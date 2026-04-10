@@ -1,18 +1,19 @@
-# Build and Release Folders
-bin-debug/
-bin-release/
-[Oo]bj/
-[Bb]in/
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.DS_Store
 
-# Other files and folders
-.settings/
+# Downloaded + processed fMRI data (large files, not committed)
+data/
 
-# Executables
-*.swf
-*.air
-*.ipa
-*.apk
+# Virtual environment
+venv/
 
-# Project files, i.e. `.project`, `.actionScriptProperties` and `.flexProperties`
-# should NOT be excluded as they contain compiler settings and other important
-# information for Eclipse / Flash Builder.
+# PyTorch Lightning logs & checkpoints
+lightning_logs/
+*.ckpt
+
+# Editors
+.vscode/
+.idea/
