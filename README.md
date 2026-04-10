@@ -1,1 +1,1 @@
-# Traffic-Flow-Prediction
+# Brain-Connectivity-GCN
