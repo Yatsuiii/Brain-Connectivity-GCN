@@ -70,6 +70,8 @@ def preprocess_subject(
         mean_fc=mean_fc,
         bold_windows=bold_windows,
         fc_windows=fc_windows,
+        window_bold=bold_windows,
+        window_fc=fc_windows,
         label=np.int64(subject["label"]),
         subject_id=subject["subject_id"],
         site=subject["site"],

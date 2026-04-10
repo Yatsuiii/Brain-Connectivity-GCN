@@ -124,20 +124,19 @@ pdf.multi_cell(
 )
 pdf.ln(3)
 pdf.set_font("dv", "I", 10)
-pdf.cell(0, 6, "Adapted from T-GCN (Zhao et al., 2019)  |  April 2026", align="C")
+pdf.cell(0, 6, "Brain-specific graph-temporal classifier  |  April 2026", align="C")
 pdf.ln(10)
 
 # 1. Motivation
 pdf.section_title("1.  Motivation & Goal")
 pdf.body(
-    "The original T-GCN model was designed for spatiotemporal traffic-speed prediction. "
-    "This project adapts and evolves it into a brain-connectivity classifier that identifies "
+    "This project builds a brain-connectivity classifier that identifies "
     "Autism Spectrum Disorder (ASD) vs. Typically Developing (TD) controls from resting-state "
     "fMRI data.\n\n"
-    "The key insight: T-GCN's GRU captures how signals evolve over time, while the GCN "
-    "captures spatial (graph) structure. In the brain, this maps naturally to dynamic functional "
+    "The key insight: temporal encoders capture how signals evolve over time, while graph "
+    "layers capture ROI connectivity structure. In the brain, this maps naturally to dynamic functional "
     "connectivity \u2014 the way correlations between brain regions change across a scan. "
-    "Rather than predicting future signals, we classify subjects based on their "
+    "The task is not forecasting; we classify subjects based on their "
     "connectivity dynamics."
 )
 
@@ -184,7 +183,7 @@ pdf.bullet([
 
 # 4. Architecture
 pdf.section_title("4.  Model Architecture  \u2014  BrainGCN Classifier")
-pdf.body("Evolution of T-GCN into a subject-level binary classifier:")
+pdf.body("Subject-level binary classifier for dynamic brain connectivity:")
 pdf.bullet([
     "Input: bold_windows (B, W, N)  +  adj (B, N, N)",
     "BrainGCNCell  (per brain-state snapshot w):",
@@ -199,11 +198,11 @@ pdf.bullet([
 pdf.add_page()
 
 # 5. Differences table
-pdf.section_title("5.  Key Differences from Original T-GCN")
+pdf.section_title("5.  Key Design Choices")
 pdf.col_table(
-    [("Aspect", 45), ("T-GCN (Traffic)", 72), ("BrainGCN (This project)", 73)],
+    [("Aspect", 45), ("Old reference direction", 72), ("BrainGCN (This project)", 73)],
     [
-        ("Domain",        "Road network traffic",  "Resting-state fMRI",         False),
+        ("Domain",        "External graph sequence", "Resting-state fMRI",       False),
         ("Nodes",         "Road sensors",          "Brain ROIs (200, CC200)",     True),
         ("Node features", "Speed at time t",       "Mean BOLD in window w",       False),
         ("Adjacency",     "Fixed road graph",      "FC matrix (data-driven)",     True),
@@ -211,7 +210,7 @@ pdf.col_table(
         ("Output",        "Future speed values",   "ASD / TD label",              True),
         ("Loss",          "MSE",                   "Cross-entropy",               False),
         ("Graph readout", "None (per-node)",        "Global mean-pool",           True),
-        ("Dataset",       "SZ / LoS traffic",      "ABIDE I  (~884 subjects)",    False),
+        ("Dataset",       "Legacy sensor datasets", "ABIDE I  (~884 subjects)",  False),
     ]
 )
 
@@ -221,7 +220,7 @@ pdf.code_block([
     "Brain-Connectivity-GCN/",
     "  brain_gcn/",
     "    utils/",
-    "      graph_conv.py                  # Laplacian normalisation (from T-GCN)",
+    "      graph_conv.py                  # Batched adjacency normalisation",
     "      data/",
     "        download.py                  # ABIDE I download via nilearn",
     "        functional_connectivity.py   # FC, sliding-window, thresholding",
@@ -234,7 +233,8 @@ pdf.code_block([
     "  data/",
     "    raw/                             # nilearn cache (.1D files)",
     "    processed/                       # per-subject .npz files",
-    "  T-GCN-master/                      # original T-GCN reference implementation",
+    "  references/",
+    "    graph_temporal_reference/        # archived background reference only",
     "  Brain_Connectivity_GCN_Plan.pdf    # this document",
 ])
 
@@ -244,10 +244,10 @@ pdf.col_table(
     [("#", 8), ("Component", 90), ("Status", 25), ("Notes", 67)],
     [
         ("1", "Data pipeline (download, FC, dataset, datamodule)", "DONE",  "Tested with 20 subjects",        False),
-        ("2", "BrainGCNCell  (GCN + GRU cell)",                   "TODO",  "Adapt TGCNCell",                  True),
-        ("3", "BrainGCNClassifier  (+ graph readout)",             "TODO",  "mean-pool + MLP head",            False),
-        ("4", "ClassificationTask  (Lightning Module)",            "TODO",  "CE loss, AUC, F1",                True),
-        ("5", "main.py + argparse training entry point",           "TODO",  "mirrors T-GCN main.py",           False),
+        ("2", "Graph-temporal classifier",                         "DONE",  "GCN projection + GRU encoder",     True),
+        ("3", "Attention / mean ROI readout",                      "DONE",  "subject-level graph pooling",      False),
+        ("4", "ClassificationTask  (Lightning Module)",            "DONE",  "CE loss, AUC, F1",                True),
+        ("5", "main.py + argparse training entry point",           "DONE",  "cached-data training CLI",         False),
         ("6", "Ablation baselines  (GCN-only, GRU-only)",          "TODO",  "isolate spatial vs temporal",     True),
         ("7", "Site-stratified cross-validation",                  "TODO",  "ABIDE benchmark comparison",      False),
         ("8", "Attention readout + ROI importance maps",           "TODO",  "interpretability",                True),
@@ -273,7 +273,6 @@ pdf.kv_table([
 # 9. References
 pdf.section_title("9.  Key References")
 pdf.bullet([
-    "Zhao et al. (2019). T-GCN: A Temporal Graph Convolutional Network. arXiv:1811.05320",
     "Di Martino et al. (2014). The Autism Brain Imaging Data Exchange. Mol. Psychiatry.",
     "Craddock et al. (2012). A whole brain fMRI atlas via spectral clustering. HBM.",
     "Kipf & Welling (2017). Semi-Supervised Classification with GCNs. ICLR.",

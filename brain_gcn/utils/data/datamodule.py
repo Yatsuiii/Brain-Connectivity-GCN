@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -62,12 +63,17 @@ class ABIDEDataModule(pl.LightningDataModule):
         max_windows: int | None = 30,
         fc_threshold: float = 0.2,
         use_dynamic_adj: bool = False,
+        use_dynamic_adj_sequence: bool = False,
         use_population_adj: bool = True,
         batch_size: int = 32,
         val_ratio: float = 0.1,
         test_ratio: float = 0.1,
+        split_strategy: str = "stratified",
+        val_site: str | None = None,
+        test_site: str | None = None,
         num_workers: int = 4,
         overwrite_cache: bool = False,
+        force_prepare: bool = False,
     ):
         """
         Parameters
@@ -80,13 +86,19 @@ class ABIDEDataModule(pl.LightningDataModule):
                            (ensures uniform batch shapes without padding)
         fc_threshold     : sparsify FC: zero edges with |fc| < threshold
         use_dynamic_adj  : per-subject: use mean of window FCs (vs. full-scan FC)
+        use_dynamic_adj_sequence: per-subject: return one adjacency per window.
+                           Ignored when use_population_adj=True.
         use_population_adj: compute a single population-level adj from training
                            set and use it for all subjects (recommended)
         batch_size       : samples per batch
         val_ratio        : fraction of data for validation
         test_ratio       : fraction of data for test
+        split_strategy   : stratified random split or site_holdout split
+        val_site         : validation site for site_holdout. If unset, chosen by size.
+        test_site        : test site for site_holdout. If unset, largest site is used.
         num_workers      : DataLoader worker processes
         overwrite_cache  : re-preprocess even if .npz files exist
+        force_prepare    : download/preprocess even when processed .npz files exist
         """
         super().__init__()
         self.data_dir = Path(data_dir)
@@ -99,12 +111,17 @@ class ABIDEDataModule(pl.LightningDataModule):
         self.max_windows = max_windows
         self.fc_threshold = fc_threshold
         self.use_dynamic_adj = use_dynamic_adj
+        self.use_dynamic_adj_sequence = use_dynamic_adj_sequence
         self.use_population_adj = use_population_adj
         self.batch_size = batch_size
         self.val_ratio = val_ratio
         self.test_ratio = test_ratio
+        self.split_strategy = split_strategy
+        self.val_site = val_site
+        self.test_site = test_site
         self.num_workers = num_workers
         self.overwrite_cache = overwrite_cache
+        self.force_prepare = force_prepare
 
         self._population_adj: np.ndarray | None = None
         self._train_paths: list[Path] = []
@@ -117,6 +134,15 @@ class ABIDEDataModule(pl.LightningDataModule):
 
     def prepare_data(self):
         """Download + preprocess (runs on rank 0 only in distributed settings)."""
+        cached_paths = list(self.processed_dir.glob("*.npz"))
+        if cached_paths and not self.overwrite_cache and not self.force_prepare:
+            log.info(
+                "Found %d cached subject files in %s; skipping download/preprocess.",
+                len(cached_paths),
+                self.processed_dir,
+            )
+            return
+
         dataset = fetch_abide(
             data_dir=self.raw_dir,
             n_subjects=self.n_subjects,
@@ -139,20 +165,31 @@ class ABIDEDataModule(pl.LightningDataModule):
                 "Run prepare_data() first."
             )
 
-        # Read labels for stratification
+        # Read labels/sites for splitting
         labels = np.array([
             int(np.load(p, allow_pickle=True)["label"]) for p in all_paths
         ])
+        sites = np.array([
+            str(np.load(p, allow_pickle=True)["site"]) for p in all_paths
+        ])
 
-        train_paths, val_paths, test_paths = self._stratified_split(
-            all_paths, labels, self.val_ratio, self.test_ratio
-        )
+        if self.split_strategy == "stratified":
+            train_paths, val_paths, test_paths = self._stratified_split(
+                all_paths, labels, self.val_ratio, self.test_ratio
+            )
+        elif self.split_strategy == "site_holdout":
+            train_paths, val_paths, test_paths = self._site_holdout_split(
+                all_paths, labels, sites, self.val_site, self.test_site
+            )
+        else:
+            raise ValueError(f"Unknown split_strategy: {self.split_strategy}")
         self._train_paths = train_paths
         self._val_paths = val_paths
         self._test_paths = test_paths
 
         log.info(
-            "Split: train=%d  val=%d  test=%d",
+            "Split (%s): train=%d  val=%d  test=%d",
+            self.split_strategy,
             len(train_paths), len(val_paths), len(test_paths),
         )
 
@@ -167,7 +204,7 @@ class ABIDEDataModule(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             collate_fn=collate_fn,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -177,7 +214,7 @@ class ABIDEDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             collate_fn=collate_fn,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
         )
 
     def test_dataloader(self) -> DataLoader:
@@ -187,7 +224,7 @@ class ABIDEDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             collate_fn=collate_fn,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
         )
 
     # ------------------------------------------------------------------
@@ -221,6 +258,7 @@ class ABIDEDataModule(pl.LightningDataModule):
             npz_paths=paths,
             population_adj=self._population_adj,
             use_dynamic_adj=self.use_dynamic_adj,
+            use_dynamic_adj_sequence=self.use_dynamic_adj_sequence,
             fc_threshold=self.fc_threshold,
             max_windows=self.max_windows,
         )
@@ -248,6 +286,53 @@ class ABIDEDataModule(pl.LightningDataModule):
             list(paths[train_val_idx[val_idx]]),
             list(paths[test_idx]),
         )
+
+    @staticmethod
+    def _site_holdout_split(
+        paths: list[Path],
+        labels: np.ndarray,
+        sites: np.ndarray,
+        val_site: str | None,
+        test_site: str | None,
+    ) -> tuple[list[Path], list[Path], list[Path]]:
+        paths_arr = np.array(paths)
+        site_counts = Counter(sites.tolist())
+        if len(site_counts) < 3:
+            raise ValueError("site_holdout split needs at least 3 sites.")
+
+        sorted_sites = [site for site, _ in site_counts.most_common()]
+        if test_site is None:
+            test_site = sorted_sites[1]
+        if val_site is None:
+            val_site = next((site for site in reversed(sorted_sites) if site != test_site), None)
+        if val_site is None or val_site == test_site:
+            raise ValueError("site_holdout split needs distinct val_site and test_site.")
+        if test_site not in site_counts:
+            raise ValueError(f"Unknown test_site '{test_site}'. Available: {sorted(site_counts)}")
+        if val_site not in site_counts:
+            raise ValueError(f"Unknown val_site '{val_site}'. Available: {sorted(site_counts)}")
+
+        train_mask = (sites != val_site) & (sites != test_site)
+        val_mask = sites == val_site
+        test_mask = sites == test_site
+
+        ABIDEDataModule._assert_both_labels(labels[train_mask], "train")
+        ABIDEDataModule._assert_both_labels(labels[val_mask], "val")
+        ABIDEDataModule._assert_both_labels(labels[test_mask], "test")
+
+        return (
+            list(paths_arr[train_mask]),
+            list(paths_arr[val_mask]),
+            list(paths_arr[test_mask]),
+        )
+
+    @staticmethod
+    def _assert_both_labels(labels: np.ndarray, split_name: str) -> None:
+        unique = set(labels.tolist())
+        if unique != {0, 1}:
+            raise ValueError(
+                f"{split_name} split must contain both labels, got {sorted(unique)}."
+            )
 
     def _build_population_adj(self, train_paths: list[Path]) -> np.ndarray:
         log.info("Building population adjacency from %d training subjects ...", len(train_paths))
@@ -277,9 +362,13 @@ class ABIDEDataModule(pl.LightningDataModule):
         parser.add_argument("--max_windows", type=int, default=30)
         parser.add_argument("--fc_threshold", type=float, default=0.2)
         parser.add_argument("--use_dynamic_adj", action="store_true")
-        parser.add_argument("--use_population_adj", action="store_true", default=True)
+        parser.add_argument("--use_dynamic_adj_sequence", action="store_true")
+        parser.add_argument("--use_population_adj", action=argparse.BooleanOptionalAction, default=True)
         parser.add_argument("--batch_size", type=int, default=32)
         parser.add_argument("--val_ratio", type=float, default=0.1)
         parser.add_argument("--test_ratio", type=float, default=0.1)
+        parser.add_argument("--split_strategy", choices=["stratified", "site_holdout"], default="stratified")
+        parser.add_argument("--val_site", type=str, default=None)
+        parser.add_argument("--test_site", type=str, default=None)
         parser.add_argument("--num_workers", type=int, default=4)
         return parser
