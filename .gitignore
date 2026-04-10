@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.DS_Store
+
+# Downloaded + processed fMRI data (large files, not committed)
+data/
+
+# Virtual environment
+venv/
+
+# PyTorch Lightning logs & checkpoints
+lightning_logs/
+*.ckpt
+
+# Editors
+.vscode/
+.idea/
