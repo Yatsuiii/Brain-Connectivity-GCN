@@ -60,7 +60,9 @@ def fetch_abide(
 
 def get_label(phenotypic_row) -> int:
     """DX_GROUP: 1 = ASD, 2 = Typical Control  →  ASD=1, TC=0"""
-    return 1 if int(phenotypic_row[LABEL_COL]) == 1 else 0
+    dx = int(phenotypic_row[LABEL_COL])
+    assert dx in (1, 2), f"Unexpected DX_GROUP value: {dx}. Must be 1 (ASD) or 2 (TC)."
+    return 1 if dx == 1 else 0
 
 
 def extract_subjects(
