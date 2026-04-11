@@ -65,6 +65,7 @@ class ABIDEDataModule(pl.LightningDataModule):
         use_dynamic_adj: bool = False,
         use_dynamic_adj_sequence: bool = False,
         use_population_adj: bool = True,
+        preserve_fc_sign: bool = False,
         batch_size: int = 32,
         val_ratio: float = 0.1,
         test_ratio: float = 0.1,
@@ -113,6 +114,7 @@ class ABIDEDataModule(pl.LightningDataModule):
         self.use_dynamic_adj = use_dynamic_adj
         self.use_dynamic_adj_sequence = use_dynamic_adj_sequence
         self.use_population_adj = use_population_adj
+        self.preserve_fc_sign = preserve_fc_sign
         self.batch_size = batch_size
         self.val_ratio = val_ratio
         self.test_ratio = test_ratio
@@ -124,6 +126,7 @@ class ABIDEDataModule(pl.LightningDataModule):
         self.force_prepare = force_prepare
 
         self._population_adj: np.ndarray | None = None
+        self._site_fc_mean: dict[str, np.ndarray] = {}
         self._train_paths: list[Path] = []
         self._val_paths: list[Path] = []
         self._test_paths: list[Path] = []
@@ -135,13 +138,26 @@ class ABIDEDataModule(pl.LightningDataModule):
     def prepare_data(self):
         """Download + preprocess (runs on rank 0 only in distributed settings)."""
         cached_paths = list(self.processed_dir.glob("*.npz"))
-        if cached_paths and not self.overwrite_cache and not self.force_prepare:
+        n_cached = len(cached_paths)
+
+        # Skip only when we already have enough subjects and no explicit override
+        have_enough = (
+            self.n_subjects is None or n_cached >= self.n_subjects
+        )
+        if cached_paths and have_enough and not self.overwrite_cache and not self.force_prepare:
             log.info(
                 "Found %d cached subject files in %s; skipping download/preprocess.",
-                len(cached_paths),
+                n_cached,
                 self.processed_dir,
             )
             return
+
+        if n_cached > 0 and not self.overwrite_cache:
+            log.info(
+                "Have %d subjects, want %s — downloading remaining subjects.",
+                n_cached,
+                self.n_subjects or "all",
+            )
 
         dataset = fetch_abide(
             data_dir=self.raw_dir,
@@ -196,6 +212,9 @@ class ABIDEDataModule(pl.LightningDataModule):
         # Build population adjacency from training subjects only
         if self.use_population_adj:
             self._population_adj = self._build_population_adj(train_paths)
+
+        # Compute per-site mean FC from training set (FC-domain site normalization)
+        self._site_fc_mean = self._build_site_fc_mean(train_paths)
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(
@@ -261,6 +280,8 @@ class ABIDEDataModule(pl.LightningDataModule):
             use_dynamic_adj_sequence=self.use_dynamic_adj_sequence,
             fc_threshold=self.fc_threshold,
             max_windows=self.max_windows,
+            site_fc_mean=self._site_fc_mean,
+            preserve_fc_sign=self.preserve_fc_sign,
         )
 
     @staticmethod
@@ -334,6 +355,25 @@ class ABIDEDataModule(pl.LightningDataModule):
                 f"{split_name} split must contain both labels, got {sorted(unique)}."
             )
 
+    def _build_site_fc_mean(self, train_paths: list[Path]) -> dict[str, np.ndarray]:
+        """Compute per-site mean FC matrix (N, N) from training subjects.
+        Subtracting this at load time removes scanner-specific connectivity biases
+        (a simple FC-domain site normalization). BOLD is already z-scored so
+        BOLD-domain corrections have no effect."""
+        log.info("Computing per-site FC means from %d training subjects ...", len(train_paths))
+        site_sums: dict[str, np.ndarray] = {}
+        site_counts: dict[str, int] = {}
+        for p in train_paths:
+            data = np.load(p, allow_pickle=True)
+            site = str(data["site"])
+            fc = data["mean_fc"].astype(np.float32)   # (N, N)
+            if site not in site_sums:
+                site_sums[site] = np.zeros_like(fc)
+                site_counts[site] = 0
+            site_sums[site] += fc
+            site_counts[site] += 1
+        return {s: site_sums[s] / site_counts[s] for s in site_sums}
+
     def _build_population_adj(self, train_paths: list[Path]) -> np.ndarray:
         log.info("Building population adjacency from %d training subjects ...", len(train_paths))
         mean_fcs = []
@@ -364,6 +404,8 @@ class ABIDEDataModule(pl.LightningDataModule):
         parser.add_argument("--use_dynamic_adj", action="store_true")
         parser.add_argument("--use_dynamic_adj_sequence", action="store_true")
         parser.add_argument("--use_population_adj", action=argparse.BooleanOptionalAction, default=True)
+        parser.add_argument("--preserve_fc_sign", action="store_true",
+                            help="Keep signed FC values in adjacency (required for fc_mlp).")
         parser.add_argument("--batch_size", type=int, default=32)
         parser.add_argument("--val_ratio", type=float, default=0.1)
         parser.add_argument("--test_ratio", type=float, default=0.1)
@@ -371,4 +413,9 @@ class ABIDEDataModule(pl.LightningDataModule):
         parser.add_argument("--val_site", type=str, default=None)
         parser.add_argument("--test_site", type=str, default=None)
         parser.add_argument("--num_workers", type=int, default=4)
+        parser.add_argument(
+            "--overwrite_cache",
+            action="store_true",
+            help="Force re-download and re-preprocess even if .npz files already exist.",
+        )
         return parser

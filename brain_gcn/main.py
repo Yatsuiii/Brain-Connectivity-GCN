@@ -68,6 +68,11 @@ def validate_args(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 def build_datamodule(args: argparse.Namespace) -> ABIDEDataModule:
+    # fc_mlp needs signed FC; auto-enable unless user explicitly set it
+    preserve_fc_sign = getattr(args, "preserve_fc_sign", False)
+    if args.model_name == "fc_mlp" and not preserve_fc_sign:
+        preserve_fc_sign = True
+
     return ABIDEDataModule(
         data_dir=args.data_dir,
         n_subjects=args.n_subjects,
@@ -78,6 +83,7 @@ def build_datamodule(args: argparse.Namespace) -> ABIDEDataModule:
         use_dynamic_adj=args.use_dynamic_adj,
         use_dynamic_adj_sequence=args.use_dynamic_adj_sequence,
         use_population_adj=args.use_population_adj,
+        preserve_fc_sign=preserve_fc_sign,
         batch_size=args.batch_size,
         val_ratio=args.val_ratio,
         test_ratio=args.test_ratio,
@@ -85,6 +91,7 @@ def build_datamodule(args: argparse.Namespace) -> ABIDEDataModule:
         val_site=args.val_site,
         test_site=args.test_site,
         num_workers=args.num_workers,
+        overwrite_cache=getattr(args, "overwrite_cache", False),
         force_prepare=args.prepare_data,
     )
 
@@ -146,7 +153,7 @@ def build_trainer(args: argparse.Namespace) -> tuple[pl.Trainer, Path]:
         deterministic=True,
         log_every_n_steps=args.log_every_n_steps,
         callbacks=[
-            EarlyStopping(monitor="val_auc", mode="max", patience=20),
+            EarlyStopping(monitor="val_auc", mode="max", patience=40),
             ModelCheckpoint(
                 dirpath=str(ckpt_dir),
                 monitor="val_auc",
@@ -198,7 +205,7 @@ def ensemble_predict(
 
     all_probs: list[torch.Tensor] = []
     for ckpt in ckpt_paths:
-        task = ClassificationTask.load_from_checkpoint(ckpt, map_location=device)
+        task = ClassificationTask.load_from_checkpoint(ckpt, map_location=device, strict=False)
         task.eval().to(device)
         batch_probs: list[torch.Tensor] = []
         with torch.no_grad():
@@ -254,6 +261,8 @@ def train_from_args(
 
 
 def main() -> None:
+    # RTX / Ampere+ GPUs: use TF32 for matmuls — faster with negligible precision loss
+    torch.set_float32_matmul_precision("medium")
     args = build_parser().parse_args()
     train_from_args(args)
 

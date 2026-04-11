@@ -32,6 +32,8 @@ class ABIDEDataset(Dataset):
         use_dynamic_adj_sequence: bool = False,
         fc_threshold: float = 0.2,
         max_windows: int | None = None,
+        site_fc_mean: dict[str, np.ndarray] | None = None,
+        preserve_fc_sign: bool = False,
     ):
         """
         Parameters
@@ -46,6 +48,15 @@ class ABIDEDataset(Dataset):
         fc_threshold    : zero-out edges with |fc| < threshold before returning
         max_windows     : truncate all subjects to this many windows so that
                           batches have uniform seq_len (takes the first W windows)
+        site_fc_mean    : per-site mean FC matrix (N, N) computed from training
+                          set. Subtracted from each subject's FC before thresholding
+                          to remove scanner/site connectivity biases (FC-domain
+                          site normalization). BOLD is already z-scored so
+                          BOLD-domain corrections have no effect.
+        preserve_fc_sign: if True, keep signed FC values in the adjacency instead
+                          of converting to |FC|. Required for fc_mlp which uses
+                          signed correlations as direct features (anti-correlations
+                          between brain networks are diagnostically relevant).
         """
         self.npz_paths = [Path(p) for p in npz_paths]
         self.population_adj = (
@@ -55,6 +66,8 @@ class ABIDEDataset(Dataset):
         self.use_dynamic_adj_sequence = use_dynamic_adj_sequence
         self.fc_threshold = fc_threshold
         self.max_windows = max_windows
+        self.site_fc_mean = site_fc_mean or {}
+        self.preserve_fc_sign = preserve_fc_sign
 
         # Pre-load labels + window counts for fast access without loading full arrays
         self._meta = self._scan_metadata()
@@ -67,8 +80,11 @@ class ABIDEDataset(Dataset):
             return data[legacy]
         raise KeyError(f"Expected '{primary}' or legacy '{legacy}' in subject archive")
 
-    def _threshold(self, adj_np: np.ndarray) -> np.ndarray:
-        return np.where(np.abs(adj_np) >= self.fc_threshold, np.abs(adj_np), 0.0)
+    def _threshold(self, adj_np: np.ndarray, preserve_sign: bool = False) -> np.ndarray:
+        mask = np.abs(adj_np) >= self.fc_threshold
+        if preserve_sign:
+            return np.where(mask, adj_np, 0.0)
+        return np.where(mask, np.abs(adj_np), 0.0)
 
     @staticmethod
     def _pad_or_truncate_windows(array: np.ndarray, max_windows: int | None) -> np.ndarray:
@@ -108,6 +124,8 @@ class ABIDEDataset(Dataset):
         bold_windows = self._array(data, "bold_windows", "window_bold").astype(np.float32)
         bold_windows = self._pad_or_truncate_windows(bold_windows, self.max_windows)
 
+        site = str(data["site"])
+
         # Adjacency: (N, N)
         if self.population_adj is not None:
             adj = self.population_adj
@@ -115,15 +133,24 @@ class ABIDEDataset(Dataset):
             if self.use_dynamic_adj_sequence:
                 wfc = self._array(data, "fc_windows", "window_fc").astype(np.float32)
                 wfc = self._pad_or_truncate_windows(wfc, self.max_windows)
-                adj_np = self._threshold(wfc).astype(np.float32)
+                # FC-domain site normalization: subtract per-site mean FC
+                if site in self.site_fc_mean:
+                    wfc = wfc - self.site_fc_mean[site].astype(np.float32)[None]
+                adj_np = self._threshold(wfc, self.preserve_fc_sign).astype(np.float32)
             elif self.use_dynamic_adj:
                 # Mean of per-window FCs
                 wfc = self._array(data, "fc_windows", "window_fc").astype(np.float32)
                 wfc = self._pad_or_truncate_windows(wfc, self.max_windows)
-                adj_np = self._threshold(wfc.mean(axis=0)).astype(np.float32)
+                fc = wfc.mean(axis=0)
+                if site in self.site_fc_mean:
+                    fc = fc - self.site_fc_mean[site].astype(np.float32)
+                adj_np = self._threshold(fc, self.preserve_fc_sign).astype(np.float32)
             else:
                 adj_np = data["mean_fc"].astype(np.float32)
-                adj_np = self._threshold(adj_np).astype(np.float32)
+                # FC-domain site normalization: subtract per-site mean FC
+                if site in self.site_fc_mean:
+                    adj_np = adj_np - self.site_fc_mean[site].astype(np.float32)
+                adj_np = self._threshold(adj_np, self.preserve_fc_sign).astype(np.float32)
             adj = torch.FloatTensor(adj_np)
 
         label = torch.tensor(int(data["label"]), dtype=torch.long)
