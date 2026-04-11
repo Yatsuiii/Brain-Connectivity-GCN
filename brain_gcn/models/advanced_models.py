@@ -14,6 +14,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from brain_gcn.utils.graph_conv import calculate_laplacian_with_self_loop, drop_edge
+from brain_gcn.models.brain_gcn import AttentionReadout
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +53,8 @@ class GraphAttentionLayer(nn.Module):
 
         # Attention scores: (batch, heads, nodes, nodes)
         scores = torch.matmul(Q, K.transpose(-2, -1)) / self.scale
-        scores = scores + (1 - adj.unsqueeze(1)) * -1e9  # Mask non-edges
+        # Mask non-edges with large negative value (binary mask, not value-based)
+        scores = scores + (adj.unsqueeze(1) == 0).float() * -1e9
 
         attn = F.softmax(scores, dim=-1)
         attn = self.dropout(attn)
@@ -132,15 +134,18 @@ class CNN3D(nn.Module):
     def __init__(self, hidden_dim: int = 64, dropout: float = 0.1):
         super().__init__()
         # Input: (batch, 1, time, height, width) for connectivity matrices
-        self.conv1 = nn.Conv3d(1, 16, kernel_size=(3, 3, 3), padding=(1, 1, 1))
-        self.conv2 = nn.Conv3d(16, 32, kernel_size=(3, 3, 3), padding=(1, 1, 1))
-        self.conv3 = nn.Conv3d(32, 64, kernel_size=(3, 3, 3), padding=(1, 1, 1))
-        
+        # Scale intermediate channels relative to hidden_dim
+        ch1 = max(8, hidden_dim // 4)
+        ch2 = max(16, hidden_dim // 2)
+        self.conv1 = nn.Conv3d(1, ch1, kernel_size=(3, 3, 3), padding=(1, 1, 1))
+        self.conv2 = nn.Conv3d(ch1, ch2, kernel_size=(3, 3, 3), padding=(1, 1, 1))
+        self.conv3 = nn.Conv3d(ch2, hidden_dim, kernel_size=(3, 3, 3), padding=(1, 1, 1))
+
         self.pool = nn.MaxPool3d(kernel_size=2, stride=2)
         self.dropout = nn.Dropout3d(dropout)
-        self.norm1 = nn.BatchNorm3d(16)
-        self.norm2 = nn.BatchNorm3d(32)
-        self.norm3 = nn.BatchNorm3d(64)
+        self.norm1 = nn.BatchNorm3d(ch1)
+        self.norm2 = nn.BatchNorm3d(ch2)
+        self.norm3 = nn.BatchNorm3d(hidden_dim)
 
     def forward(self, fc_windows: torch.Tensor) -> torch.Tensor:
         # fc_windows: (batch, windows, nodes, nodes)
@@ -211,32 +216,15 @@ class GraphSAGELayer(nn.Module):
 class GraphSAGEEncoder(nn.Module):
     """Multi-layer GraphSAGE encoder."""
 
-    def __init__(self, in_dim: int, hidden_dim: int, knockout: float = 0.1):
+    def __init__(self, in_dim: int, hidden_dim: int, dropout: float = 0.1):
         super().__init__()
-        self.layer1 = GraphSAGELayer(in_dim, hidden_dim, dropout=knockout)
-        self.layer2 = GraphSAGELayer(hidden_dim, hidden_dim, dropout=knockout)
+        self.layer1 = GraphSAGELayer(in_dim, hidden_dim, dropout=dropout)
+        self.layer2 = GraphSAGELayer(hidden_dim, hidden_dim, dropout=dropout)
 
     def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
         h = self.layer1(x, adj)
         h = self.layer2(h, adj)
         return h
-
-
-# ---------------------------------------------------------------------------
-# Attention Readout (shared)
-# ---------------------------------------------------------------------------
-
-class AttentionReadout(nn.Module):
-    """Learn per-ROI attention weights."""
-
-    def __init__(self, hidden_dim: int):
-        super().__init__()
-        self.score = nn.Linear(hidden_dim, 1)
-
-    def forward(self, node_embeddings: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        weights = torch.softmax(self.score(node_embeddings).squeeze(-1), dim=-1)
-        pooled = torch.sum(node_embeddings * weights.unsqueeze(-1), dim=1)
-        return pooled, weights
 
 
 # ---------------------------------------------------------------------------
@@ -312,17 +300,17 @@ class CNN3DClassifier(nn.Module):
     def __init__(self, hidden_dim: int = 64, dropout: float = 0.5):
         super().__init__()
         self.cnn = CNN3D(hidden_dim, dropout=min(dropout, 0.2))
-        self.head = make_head(64, dropout=dropout)
+        self.head = make_head(hidden_dim, dropout=dropout)
 
     def forward(self, bold_windows: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
-        # Reshape adj to (batch, 1, nodes, nodes) if needed for 3D convolution
-        # Use adjacency as a static connectivity pattern expanded across windows
-        batch_size, nodes, nodes2 = adj.shape if adj.dim() == 3 else (adj.shape[0], adj.shape[1], adj.shape[2])
-        
-        # Reshape for 3D CNN: (batch, 1, windows, nodes, nodes)
-        # Use the adjacency pattern expanded across windows
-        fc_windows = adj.unsqueeze(1).expand(-1, bold_windows.shape[1] if bold_windows.dim() > 2 else 1, -1, -1)
-        
+        if adj.dim() == 4:
+            # Dynamic adjacency (B, W, N, N) — use directly
+            fc_windows = adj
+        else:
+            # Static adjacency (B, N, N) — replicate across windows
+            W = bold_windows.shape[1]
+            fc_windows = adj.unsqueeze(1).expand(-1, W, -1, -1)
+
         h = self.cnn(fc_windows)  # (batch, 64)
         logits = self.head(h)
         return logits
@@ -333,7 +321,7 @@ class GraphSAGEClassifier(nn.Module):
 
     def __init__(self, hidden_dim: int = 64, dropout: float = 0.5):
         super().__init__()
-        self.encoder = GraphSAGEEncoder(1, hidden_dim, knockout=min(dropout, 0.2))
+        self.encoder = GraphSAGEEncoder(1, hidden_dim, dropout=min(dropout, 0.2))
         self.attention = AttentionReadout(hidden_dim)
         self.head = make_head(hidden_dim, dropout=dropout)
 

@@ -1,22 +1,61 @@
 """Generate Brain-Connectivity-GCN project plan as a PDF."""
+import subprocess
+import sys
+from pathlib import Path
 from fpdf import FPDF
 
-FONT_DIR = (
-    "/home/Yatsuiii/Brain-Connectivity-GCN/venv/lib/python3.14"
-    "/site-packages/matplotlib/mpl-data/fonts/ttf"
-)
+
+def _find_dejavu_font_dir() -> Path:
+    """Locate DejaVu TTF fonts without hardcoding any path."""
+    # 1. matplotlib bundles DejaVu — use its API if available
+    try:
+        import matplotlib
+        mpl_ttf = Path(matplotlib.get_data_path()) / "fonts" / "ttf"
+        if (mpl_ttf / "DejaVuSans.ttf").exists():
+            return mpl_ttf
+    except ImportError:
+        pass
+
+    # 2. System fonts (Debian/Ubuntu/Arch)
+    for candidate in [
+        Path("/usr/share/fonts/truetype/dejavu"),
+        Path("/usr/share/fonts/TTF"),
+        Path("/usr/share/fonts/dejavu"),
+    ]:
+        if (candidate / "DejaVuSans.ttf").exists():
+            return candidate
+
+    # 3. Fall back: let fc-list tell us where a DejaVu font lives
+    try:
+        out = subprocess.check_output(
+            ["fc-list", ":family=DejaVu Sans:style=Book", "--format=%{file}\n"],
+            text=True,
+        ).strip()
+        if out:
+            return Path(out.splitlines()[0]).parent
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass
+
+    raise FileNotFoundError(
+        "Could not locate DejaVu TTF fonts. "
+        "Install them with: sudo apt install fonts-dejavu-core  "
+        "or: pip install matplotlib"
+    )
+
+
+FONT_DIR = _find_dejavu_font_dir()
 MONO_DIR = FONT_DIR
 
 
 class PDF(FPDF):
     def __init__(self):
         super().__init__()
-        self.add_font("dv",  "",  f"{FONT_DIR}/DejaVuSans.ttf")
-        self.add_font("dv",  "B", f"{FONT_DIR}/DejaVuSans-Bold.ttf")
-        self.add_font("dv",  "I", f"{FONT_DIR}/DejaVuSans-Oblique.ttf")
-        self.add_font("dv",  "BI",f"{FONT_DIR}/DejaVuSans-BoldOblique.ttf")
-        self.add_font("mono","",  f"{MONO_DIR}/DejaVuSansMono.ttf")
-        self.add_font("mono","B", f"{MONO_DIR}/DejaVuSansMono-Bold.ttf")
+        self.add_font("dv",  "",  str(FONT_DIR / "DejaVuSans.ttf"))
+        self.add_font("dv",  "B", str(FONT_DIR / "DejaVuSans-Bold.ttf"))
+        self.add_font("dv",  "I", str(FONT_DIR / "DejaVuSans-Oblique.ttf"))
+        self.add_font("dv",  "BI",str(FONT_DIR / "DejaVuSans-BoldOblique.ttf"))
+        self.add_font("mono","",  str(MONO_DIR / "DejaVuSansMono.ttf"))
+        self.add_font("mono","B", str(MONO_DIR / "DejaVuSansMono-Bold.ttf"))
 
     def header(self):
         self.set_font("dv", "B", 10)
@@ -280,6 +319,6 @@ pdf.bullet([
     "Hutchison et al. (2013). Dynamic functional connectivity: Promise, issues, interpretations. NeuroImage.",
 ])
 
-out = "/home/Yatsuiii/Brain-Connectivity-GCN/Brain_Connectivity_GCN_Plan.pdf"
-pdf.output(out)
+out = Path(__file__).parent / "Brain_Connectivity_GCN_Plan.pdf"
+pdf.output(str(out))
 print(f"PDF saved to {out}")

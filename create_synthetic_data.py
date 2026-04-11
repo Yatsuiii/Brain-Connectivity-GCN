@@ -4,18 +4,16 @@ Create synthetic ABIDE-like data for quick testing.
 Generates minimal .npz files compatible with the training pipeline.
 """
 import sys
-import os
 from pathlib import Path
 import numpy as np
 
-# Setup paths
-project_root = Path(__file__).parent / "Brain-Connectivity-GCN-main"
-sys.path.insert(0, str(project_root))
-os.chdir(str(project_root))
+_PROJECT_ROOT = Path(__file__).parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 def create_synthetic_data(n_subjects=50, n_rois=200, window_len=50, num_windows=20):
     """Create synthetic dataset."""
-    processed_dir = Path("data/processed")
+    processed_dir = _PROJECT_ROOT / "data" / "processed"
     processed_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"Creating synthetic ABIDE dataset...")

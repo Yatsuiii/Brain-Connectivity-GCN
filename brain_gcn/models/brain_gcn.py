@@ -328,4 +328,16 @@ def build_model(
         return TemporalGRUClassifier(hidden_dim, num_classes, dropout)
     if model_name == "fc_mlp":
         return ConnectivityMLPClassifier(hidden_dim, num_classes, dropout)
+    # Advanced models — lazy import to avoid circular dependency
+    from brain_gcn.models.advanced_models import (
+        GATClassifier, TransformerClassifier, CNN3DClassifier, GraphSAGEClassifier,
+    )
+    if model_name == "gat":
+        return GATClassifier(hidden_dim, dropout=dropout)
+    if model_name == "transformer":
+        return TransformerClassifier(hidden_dim, dropout=dropout)
+    if model_name == "cnn3d":
+        return CNN3DClassifier(hidden_dim, dropout=dropout)
+    if model_name == "graphsage":
+        return GraphSAGEClassifier(hidden_dim, dropout=dropout)
     raise ValueError(f"Unknown model_name: {model_name}")

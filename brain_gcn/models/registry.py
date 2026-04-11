@@ -100,6 +100,7 @@ class ModelConfig:
     @classmethod
     def from_dict(cls, config_dict: dict) -> ModelConfig:
         """Load configuration from dictionary."""
+        config_dict = dict(config_dict)  # don't mutate caller's dict
         model_name = config_dict.pop('model_name')
         return cls(model_name, **config_dict)
 

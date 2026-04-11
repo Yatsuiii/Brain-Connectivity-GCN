@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from pathlib import Path
 
 from brain_gcn.main import build_parser
 from brain_gcn.utils.cross_validation import kfold_cross_validate
@@ -62,7 +63,7 @@ def main():
             log.info(f"{key}: {value:.4f}")
 
     # Save summary
-    summary_file = args.cv_output_dir + "/cv_summary.json"
+    summary_file = Path(args.cv_output_dir) / "cv_summary.json"
     with open(summary_file, "w") as f:
         json.dump(cv_results.to_dict(), f, indent=2)
 

@@ -171,7 +171,7 @@ class ClassificationTask(pl.LightningModule):
         parser.add_argument("--readout", choices=["mean", "attention"], default="attention")
         parser.add_argument(
             "--model_name",
-            choices=["graph_temporal", "gcn", "gru", "fc_mlp"],
+            choices=["graph_temporal", "gcn", "gru", "fc_mlp", "gat", "transformer", "cnn3d", "graphsage"],
             default="graph_temporal",
         )
         parser.add_argument("--lr", type=float, default=1e-3)
