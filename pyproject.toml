@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brain_gcn"
+version = "0.1.0"
+description = "Graph Convolutional Networks for Brain Connectivity Analysis"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.21.0",
+    "torch>=1.9.0",
+    "pytorch-lightning>=1.5.0",
+    "torchmetrics>=0.7.0",
+    "scikit-learn>=0.24.0",
+    "nilearn>=0.7.1",
+    "scipy>=1.7.0",
+    "pandas>=1.3.0",
+    "matplotlib>=3.4.0",
+    "optuna>=2.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov>=2.12.0",
+]
