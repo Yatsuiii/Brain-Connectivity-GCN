@@ -5,7 +5,6 @@ Run: python examples_new_features.py
 """
 
 import numpy as np
-from pathlib import Path
 
 print("\n" + "=" * 80)
 print("BRAIN-CONNECTIVITY-GCN: NEW FEATURES SHOWCASE")
@@ -23,18 +22,15 @@ def example_1_model_registry():
 
     from brain_gcn.models import ModelRegistry, ModelConfig
 
-    # Print all available models
-    print("\n📋 All Available Models:")
+    print("\n[*] All Available Models:")
     ModelRegistry.print_registry()
 
-    # Get specific model info
-    print("\n📊 Graph Attention Network Details:")
+    print("\n[*] Graph Attention Network Details:")
     gat_info = ModelRegistry.get_model_info('gat')
     for key, val in gat_info.items():
         print(f"  {key:20s}: {val}")
 
-    # Build model from config
-    print("\n🔧 Building Transformer Model:")
+    print("\n[*] Building Transformer Model:")
     config = ModelConfig(
         model_name='transformer',
         hidden_dim=128,
@@ -59,48 +55,34 @@ def example_2_augmentation():
         AugmentationPipeline,
     )
 
-    # Create synthetic BOLD data
-    T, N = 200, 100  # 200 timepoints, 100 ROIs
+    T, N = 200, 100
     bold = np.random.randn(T, N).astype(np.float32)
 
     print(f"\nOriginal BOLD shape: {bold.shape}")
-
-    # Example 1: Individual augmentations
-    print("\n📌 Individual Augmentations:")
+    print("\n[*] Individual Augmentations:")
 
     noisy = BoldAugmentation.gaussian_noise(bold, std=0.01)
-    print(f"  ✓ Gaussian noise applied")
+    print(f"  [OK] Gaussian noise")
 
     jittered = BoldAugmentation.temporal_jitter(bold, jitter_std=0.5)
-    print(f"  ✓ Temporal jitter applied")
+    print(f"  [OK] Temporal jitter")
 
     dropped = BoldAugmentation.roi_dropout(bold, dropout_rate=0.1)
-    print(f"  ✓ ROI dropout applied")
+    print(f"  [OK] ROI dropout")
 
     scaled = BoldAugmentation.amplitude_scaling(bold, scale_range=(0.8, 1.2))
-    print(f"  ✓ Amplitude scaling applied")
+    print(f"  [OK] Amplitude scaling")
 
-    # Example 2: Preset pipelines
-    print("\n🔀 Augmentation Pipelines:")
+    print("\n[*] Augmentation Pipelines:")
 
     light = AugmentationPipeline.light()
-    print(f"  ✓ Light pipeline: {[a[0] for a in light.augmentations]}")
+    print(f"  [OK] Light: {[a[0] for a in light.augmentations]}")
 
     moderate = AugmentationPipeline.moderate()
-    print(f"  ✓ Moderate pipeline: {[a[0] for a in moderate.augmentations]}")
+    print(f"  [OK] Moderate: {[a[0] for a in moderate.augmentations]}")
 
     aggressive = AugmentationPipeline.aggressive()
-    print(f"  ✓ Aggressive pipeline: {[a[0] for a in aggressive.augmentations]}")
-
-    # Example 3: Custom pipeline
-    print("\n⚙️  Custom Pipeline:")
-    custom = AugmentationPipeline([
-        ('gaussian_noise', {'std': 0.02}),
-        ('roi_dropout', {'dropout_rate': 0.15}),
-        ('amplitude_scaling', {'scale_range': (0.85, 1.15)}),
-    ])
-    augmented = custom.apply(bold)
-    print(f"  ✓ Applied custom pipeline: {augmented.shape}")
+    print(f"  [OK] Aggressive: {[a[0] for a in aggressive.augmentations]}")
 
 
 # ===========================================================================
@@ -114,26 +96,23 @@ def example_3_fc_measures():
 
     from brain_gcn.utils.data.augmentation import FunctionalConnectivityMeasures
 
-    # Synthetic data
     T, N = 200, 50
     bold = np.random.randn(T, N).astype(np.float32)
 
-    print(f"\nBOLD data: {T} timepoints × {N} ROIs")
-
-    # Pearson correlation
-    print("\n📊 Computing Different FC Measures:")
+    print(f"\nBOLD data: {T} timepoints x {N} ROIs")
+    print("\n[*] Computing Different FC Measures:")
 
     fc_pearson = FunctionalConnectivityMeasures.pearson_correlation(bold)
-    print(f"  ✓ Pearson correlation: shape {fc_pearson.shape}, mean {fc_pearson.mean():.4f}")
+    print(f"  [OK] Pearson: {fc_pearson.shape}, mean {fc_pearson.mean():.4f}")
 
     fc_partial = FunctionalConnectivityMeasures.partial_correlation(bold)
-    print(f"  ✓ Partial correlation: shape {fc_partial.shape}, mean {fc_partial.mean():.4f}")
+    print(f"  [OK] Partial: {fc_partial.shape}, mean {fc_partial.mean():.4f}")
 
     fc_mi = FunctionalConnectivityMeasures.mutual_information(bold, bins=10)
-    print(f"  ✓ Mutual information: shape {fc_mi.shape}, mean {fc_mi.mean():.4f}")
+    print(f"  [OK] MI: {fc_mi.shape}, mean {fc_mi.mean():.4f}")
 
     fc_coh = FunctionalConnectivityMeasures.coherence(bold, freq_range=(0.01, 0.1))
-    print(f"  ✓ Frequency coherence: shape {fc_coh.shape}, mean {fc_coh.mean():.4f}")
+    print(f"  [OK] Coherence: {fc_coh.shape}, mean {fc_coh.mean():.4f}")
 
 
 # ===========================================================================
@@ -149,32 +128,24 @@ def example_4_preprocessing():
 
     T, N = 300, 50
     bold = np.random.randn(T, N).astype(np.float32)
-    motion = np.random.randn(T, 6) * 0.2  # Random motion params
+    motion = np.random.randn(T, 6) * 0.2
 
-    print(f"\nBOLD data: {T} timepoints × {N} ROIs")
-    print(f"Motion params: {T} timepoints × 6 parameters")
-
-    # Bandpass filtering
-    print("\n🔧 Preprocessing steps:")
+    print(f"\nBOLD data: {T} timepoints x {N} ROIs")
+    print(f"Motion params: {T} x 6")
+    print("\n[*] Preprocessing steps:")
 
     bold_filtered = SignalPreprocessing.bandpass_filter(
-        bold,
-        freq_range=(0.01, 0.1),
-        fs=0.5
+        bold, freq_range=(0.01, 0.1), fs=0.5
     )
-    print(f"  ✓ Bandpass filtered {bold.shape} → {bold_filtered.shape}")
+    print(f"  [OK] Bandpass filter")
 
-    # Motion scrubbing
     bold_clean = SignalPreprocessing.motion_scrubbing(
-        bold,
-        motion=motion,
-        threshold=0.5
+        bold, motion=motion, threshold=0.5
     )
-    print(f"  ✓ Motion scrubbing applied")
+    print(f"  [OK] Motion scrubbing")
 
-    # ICA denoising
     bold_ica = SignalPreprocessing.ica_denoise(bold, n_components=20)
-    print(f"  ✓ ICA denoising: kept 20 components")
+    print(f"  [OK] ICA denoising (20 components)")
 
 
 # ===========================================================================
@@ -194,7 +165,7 @@ def example_5_visualization():
         StatisticalVisualizer,
     )
 
-    print("\n📊 Available Visualization Functions:")
+    print("\n[*] Available Visualization Classes:")
 
     visualizers = [
         ("BrainConnectivityVisualizer", [
@@ -221,16 +192,7 @@ def example_5_visualization():
     for viz_class, methods in visualizers:
         print(f"\n  {viz_class}:")
         for method in methods:
-            print(f"    • {method}")
-
-    print("\n💡 Example: Model Comparison Plot")
-    print("  from brain_gcn.utils.visualization import ModelAnalyzer")
-    print("  results = {")
-    print("      'graph_temporal': {'test_auc': 0.856},")
-    print("      'gat': {'test_auc': 0.842},")
-    print("      'transformer': {'test_auc': 0.834},")
-    print("  }")
-    print("  ModelAnalyzer.plot_model_comparison(results, output_path='models.png')")
+            print(f"    - {method}")
 
 
 # ===========================================================================
@@ -243,44 +205,36 @@ def example_6_model_comparison_workflow():
     print("=" * 80)
 
     print("""
-📋 Typical Workflow to Compare All 8 Models:
+[*] Compare All 8 Models:
 
-Step 1: Run experiment on all models
+Step 1: Run all models
   python -m brain_gcn.experiments \\
     --models graph_temporal gcn gru fc_mlp gat transformer cnn3d graphsage \\
     --max_epochs 50 \\
     --results_csv results/all_models.csv
 
-Step 2: Visualize comparison
+Step 2: Analyze results
   python -c "
-from brain_gcn.utils.visualization import ModelAnalyzer
 import pandas as pd
-
 df = pd.read_csv('results/all_models.csv')
-results = {row['model_name']: row.to_dict() 
-           for _, row in df.iterrows()}
-ModelAnalyzer.plot_model_comparison(results, output_path='comparison.png')
+best = df.loc[df['test_auc'].idxmax()]
+print(f'Best model: {best[\"model_name\"]} (AUC: {best[\"test_auc\"]:.3f})')
   "
 
-Step 3: Find best model
-  best_model = df.loc[df['test_auc'].idxmax(), 'model_name']
-  print(f"Best model: {best_model}")
-
-Step 4: Train best model with extended evaluation
+Step 3: Train best model
   python -m brain_gcn.main \\
-    --model_name {best_model} \\
-    --max_epochs 200 \\
-    --test
-  
+    --model_name [BEST_MODEL] \\
+    --max_epochs 200
+
+Step 4: Extended evaluation
   python -m brain_gcn.eval_cli \\
-    --eval_checkpoint checkpoints/{best_model}/best.ckpt \\
     --eval_plot_roc \\
     --eval_plot_pr \\
     --eval_bootstrap_ci
 
-Step 5: Validate with cross-validation
+Step 5: Cross-validation
   python -m brain_gcn.cv_cli \\
-    --model_name {best_model} \\
+    --model_name [BEST_MODEL] \\
     --cv_n_splits 5
     """)
 
@@ -295,11 +249,11 @@ def example_7_custom_pipeline():
     print("=" * 80)
 
     print("""
-📌 Create a Custom Pipeline for Your Use Case:
+[*] Create Custom Pipeline:
 
 from brain_gcn.utils.data.augmentation import AugmentationPipeline
 
-# Example: Robust augmentation for small dataset
+# Robust augmentation for small dataset
 robust_aug = AugmentationPipeline([
     ('gaussian_noise', {'std': 0.015}),
     ('temporal_jitter', {'jitter_std': 0.5}),
@@ -307,21 +261,19 @@ robust_aug = AugmentationPipeline([
     ('amplitude_scaling', {'scale_range': (0.9, 1.1)}),
 ])
 
-# Use in training
+# Apply in training
 bold_augmented = robust_aug.apply(bold_signal)
 
-# Or integrate with Lightning
+# Or integrate with Lightning:
 class CustomTask(ClassificationTask):
     def __init__(self, *args, augmentation=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.augmentation = augmentation or AugmentationPipeline.light()
     
     def training_step(self, batch, batch_idx):
-        bold_windows, adj, labels = batch
-        # Apply augmentation
-        bold_aug = self.augmentation.apply(bold_windows.cpu().numpy())
-        bold_windows = torch.tensor(bold_aug)
-        return self._step((bold_windows, adj, labels), "train")
+        bold, adj, labels = batch
+        bold = self.augmentation.apply(bold.cpu().numpy())
+        return self._step((bold, adj, labels), "train")
     """)
 
 
@@ -332,42 +284,42 @@ if __name__ == "__main__":
     try:
         example_1_model_registry()
     except Exception as e:
-        print(f"  ⚠️  Skipped (import): {e}")
+        print(f"  [SKIP] Registry: {type(e).__name__}")
 
     try:
         example_2_augmentation()
     except Exception as e:
-        print(f"  ⚠️  Skipped: {e}")
+        print(f"  [SKIP] Augmentation: {type(e).__name__}")
 
     try:
         example_3_fc_measures()
     except Exception as e:
-        print(f"  ⚠️  Skipped: {e}")
+        print(f"  [SKIP] FC Measures: {type(e).__name__}")
 
     try:
         example_4_preprocessing()
     except Exception as e:
-        print(f"  ⚠️  Skipped: {e}")
+        print(f"  [SKIP] Preprocessing: {type(e).__name__}")
 
     try:
         example_5_visualization()
     except Exception as e:
-        print(f"  ⚠️  Skipped: {e}")
+        print(f"  [SKIP] Visualization: {type(e).__name__}")
 
     example_6_model_comparison_workflow()
     example_7_custom_pipeline()
 
     print("\n" + "=" * 80)
-    print("✅ EXAMPLES COMPLETE")
+    print("[OK] EXAMPLES COMPLETE")
     print("=" * 80)
     print("""
-📚 For more information:
-  • Models & Pipeline: See MODELS_AND_PIPELINE.md
-  • Experiments: See EXPERIMENTS.md
-  • Main README: See README.md
+[*] For more information:
+  - Models & Data Pipeline: MODELS_AND_PIPELINE.md
+  - Experiments & Evaluation: EXPERIMENTS.md
+  - Project Overview: README.md
 
-🚀 Quick Start:
-  # Train with GAT model
+[*] Quick Start:
+  # Train GAT model
   python -m brain_gcn.main --model_name gat --max_epochs 50
 
   # Compare all 8 models
@@ -376,4 +328,7 @@ if __name__ == "__main__":
 
   # Hyperparameter search
   python -m brain_gcn.hpo_cli --hpo_n_trials 20
+
+  # Validation with cross-validation
+  python -m brain_gcn.cv_cli --cv_n_splits 5
     """)
