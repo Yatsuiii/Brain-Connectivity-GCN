@@ -490,6 +490,115 @@ class BrainModeNetwork(nn.Module):
         return torch.from_numpy(modes)
 
 
+class AdversarialBrainModeNetwork(nn.Module):
+    """Brain Mode Network with adversarial site deconfounding.
+
+    Combines the compact mode-interaction representation of BrainModeNetwork
+    with the Gradient Reversal Layer (GRL) of Ganin et al. 2016 to push
+    the learned modes towards site-invariant directions.
+
+    Architecture:
+        bold_windows, FC
+            → mode interaction M_kl = v_k^T · FC · v_l   (K×K)
+            → flatten upper triangle + temporal std        (K(K+1)/2 + K features)
+            → shared_encoder (MLP)
+            ↙                         ↘
+        asd_head                  grl(α) → site_head
+        (minimize ASD CE)         (modes unlearn scanner fingerprint)
+
+    The discriminative_init() classmethod inherited from BrainModeNetwork
+    still applies — we start from ASD-TD difference directions and then
+    adversarially remove site confounds while preserving diagnosis signal.
+    """
+
+    def __init__(
+        self,
+        num_nodes: int,
+        num_modes: int = 32,
+        hidden_dim: int = 64,
+        num_classes: int = 2,
+        num_sites: int = 17,
+        dropout: float = 0.5,
+        mode_init: "torch.Tensor | None" = None,
+    ):
+        super().__init__()
+        self.num_modes = num_modes
+        self.num_nodes = num_nodes
+
+        # Shared mode parameters (same as BrainModeNetwork)
+        if mode_init is not None:
+            modes_init = mode_init.clone().float()
+        else:
+            modes_init_np = torch.randn(num_nodes, num_modes)
+            Q, _ = torch.linalg.qr(modes_init_np)
+            modes_init = Q.T.contiguous()
+        self.modes = nn.Parameter(modes_init)
+
+        num_fc_features = num_modes * (num_modes + 1) // 2
+        num_total_features = num_fc_features + num_modes   # static + dynamic
+
+        # Shared encoder
+        self.encoder = nn.Sequential(
+            nn.LayerNorm(num_total_features),
+            nn.Linear(num_total_features, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+        # ASD head
+        self.asd_head = nn.Linear(hidden_dim, num_classes)
+
+        # Adversarial site branch
+        self.grl = GradientReversal(alpha=0.0)
+        self.site_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, num_sites),
+        )
+
+    def _encode(self, bold_windows: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+        """Compute mode features and pass through shared encoder."""
+        if adj.dim() == 4:
+            adj = adj.mean(dim=1)
+
+        M = torch.einsum('kn,bnm,lm->bkl', self.modes, adj, self.modes)
+        r, c = torch.triu_indices(self.num_modes, self.num_modes,
+                                  offset=0, device=adj.device)
+        fc_features = M[:, r, c]
+
+        A = torch.einsum('kn,bwn->bwk', self.modes, bold_windows)
+        dyn_features = A.std(dim=1)
+
+        features = torch.cat([fc_features, dyn_features], dim=-1)
+        return self.encoder(features)
+
+    def forward(
+        self,
+        bold_windows: torch.Tensor,
+        adj: torch.Tensor,
+        return_site_logits: bool = False,
+    ) -> "torch.Tensor | tuple[torch.Tensor, torch.Tensor]":
+        h = self._encode(bold_windows, adj)
+        asd_logits = self.asd_head(h)
+        if return_site_logits:
+            site_logits = self.site_head(self.grl(h))
+            return asd_logits, site_logits
+        return asd_logits
+
+    def orthogonality_loss(self) -> torch.Tensor:
+        """Identical to BrainModeNetwork.orthogonality_loss()."""
+        V_norm = self.modes / (self.modes.norm(dim=1, keepdim=True) + 1e-8)
+        gram = V_norm @ V_norm.T
+        I = torch.eye(self.num_modes, device=gram.device, dtype=gram.dtype)
+        return ((gram - I) ** 2).mean()
+
+    # Expose discriminative_init as a static method (same logic as BrainModeNetwork)
+    discriminative_init = BrainModeNetwork.discriminative_init
+
+
 class AdversarialConnectivityMLP(nn.Module):
     """FC-based classifier with adversarial site deconfounding (Ganin et al. 2016).
 
@@ -584,6 +693,9 @@ def build_model(
     if model_name == "brain_mode":
         return BrainModeNetwork(num_nodes, num_modes, hidden_dim, num_classes, dropout,
                                 mode_init=mode_init)
+    if model_name == "adv_brain_mode":
+        return AdversarialBrainModeNetwork(num_nodes, num_modes, hidden_dim, num_classes,
+                                           num_sites, dropout, mode_init=mode_init)
     # Advanced models — lazy import to avoid circular dependency
     from brain_gcn.models.advanced_models import (
         GATClassifier, TransformerClassifier, CNN3DClassifier, GraphSAGEClassifier,

@@ -54,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 
 def validate_args(args: argparse.Namespace) -> None:
-    if args.model_name in ("fc_mlp", "adv_fc_mlp", "brain_mode") and args.use_population_adj:
+    if args.model_name in ("fc_mlp", "adv_fc_mlp", "brain_mode", "adv_brain_mode") and args.use_population_adj:
         raise ValueError(
             "fc_mlp needs per-subject connectivity. Re-run with --no-use_population_adj."
         )
@@ -71,7 +71,7 @@ def validate_args(args: argparse.Namespace) -> None:
 def build_datamodule(args: argparse.Namespace) -> ABIDEDataModule:
     # fc_mlp variants need signed FC; auto-enable unless user explicitly set it
     preserve_fc_sign = getattr(args, "preserve_fc_sign", False)
-    if args.model_name in ("fc_mlp", "adv_fc_mlp", "brain_mode") and not preserve_fc_sign:
+    if args.model_name in ("fc_mlp", "adv_fc_mlp", "brain_mode", "adv_brain_mode") and not preserve_fc_sign:
         preserve_fc_sign = True
 
     return ABIDEDataModule(
@@ -140,7 +140,7 @@ def build_task(args: argparse.Namespace, dm: ABIDEDataModule) -> ClassificationT
         class_weights = None
 
     mode_init = None
-    if args.model_name == "brain_mode":
+    if args.model_name in ("brain_mode", "adv_brain_mode"):
         try:
             mode_init = _discriminative_mode_init(dm, getattr(args, "num_modes", 16))
         except Exception as exc:
@@ -172,7 +172,7 @@ def build_trainer(args: argparse.Namespace) -> tuple[pl.Trainer, Path]:
     ckpt_name = args.model_name
     if getattr(args, "n_pca_components", 0) > 0:
         ckpt_name += f"_pca{args.n_pca_components}"
-    if args.model_name == "brain_mode":
+    if args.model_name in ("brain_mode", "adv_brain_mode"):
         split_tag = getattr(args, "split_strategy", "site_holdout")[:4]  # e.g. "site" or "stra"
         ckpt_name += f"_k{getattr(args, 'num_modes', 16)}_{split_tag}"
     ckpt_dir = Path("checkpoints") / ckpt_name

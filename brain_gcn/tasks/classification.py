@@ -98,7 +98,7 @@ class ClassificationTask(pl.LightningModule):
 
     @property
     def _is_adversarial(self) -> bool:
-        return self.hparams.model_name == "adv_fc_mlp"
+        return self.hparams.model_name in ("adv_fc_mlp", "adv_brain_mode")
 
     # ------------------------------------------------------------------
     def forward(self, bold_windows: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
@@ -219,7 +219,8 @@ class ClassificationTask(pl.LightningModule):
         parser.add_argument(
             "--model_name",
             choices=["graph_temporal", "gcn", "gru", "fc_mlp", "adv_fc_mlp",
-                     "gat", "transformer", "cnn3d", "graphsage", "brain_mode"],
+                     "gat", "transformer", "cnn3d", "graphsage",
+                     "brain_mode", "adv_brain_mode"],
             default="graph_temporal",
         )
         parser.add_argument("--lr", type=float, default=1e-3)
