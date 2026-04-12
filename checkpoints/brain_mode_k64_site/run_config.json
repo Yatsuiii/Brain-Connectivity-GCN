@@ -1,0 +1,5 @@
+{
+  "model_name": "brain_mode",
+  "use_dynamic_adj_sequence": false,
+  "use_population_adj": false
+}
