@@ -34,6 +34,11 @@ class ABIDEDataset(Dataset):
         max_windows: int | None = None,
         site_fc_mean: dict[str, np.ndarray] | None = None,
         preserve_fc_sign: bool = False,
+        site_to_int: dict[str, int] | None = None,
+        use_fc_variance: bool = False,
+        use_fisher_z: bool = False,
+        pca_mean: np.ndarray | None = None,
+        pca_components: np.ndarray | None = None,
     ):
         """
         Parameters
@@ -68,6 +73,11 @@ class ABIDEDataset(Dataset):
         self.max_windows = max_windows
         self.site_fc_mean = site_fc_mean or {}
         self.preserve_fc_sign = preserve_fc_sign
+        self.site_to_int = site_to_int or {}
+        self.use_fc_variance = use_fc_variance
+        self.use_fisher_z = use_fisher_z
+        self.pca_mean = pca_mean
+        self.pca_components = pca_components
 
         # Pre-load labels + window counts for fast access without loading full arrays
         self._meta = self._scan_metadata()
@@ -85,6 +95,17 @@ class ABIDEDataset(Dataset):
         if preserve_sign:
             return np.where(mask, adj_np, 0.0)
         return np.where(mask, np.abs(adj_np), 0.0)
+
+    @staticmethod
+    def _fisher_z(fc: np.ndarray) -> np.ndarray:
+        """Fisher's r-to-z transform: z = arctanh(r).
+
+        Linearises the correlation space — correlations near ±1 are compressed
+        in Pearson space but uniform in z-space. Stabilises variance across
+        different correlation magnitudes, which matters for linear classifiers.
+        Clipped to ±0.9999 to avoid ±inf at perfect correlations.
+        """
+        return np.arctanh(np.clip(fc, -0.9999, 0.9999))
 
     @staticmethod
     def _pad_or_truncate_windows(array: np.ndarray, max_windows: int | None) -> np.ndarray:
@@ -126,35 +147,61 @@ class ABIDEDataset(Dataset):
 
         site = str(data["site"])
 
-        # Adjacency: (N, N)
+        # Adjacency
         if self.population_adj is not None:
-            adj = self.population_adj
+            adj = self.population_adj                          # (N, N) shared
+
+        elif self.use_dynamic_adj_sequence:
+            wfc = self._array(data, "fc_windows", "window_fc").astype(np.float32)
+            wfc = self._pad_or_truncate_windows(wfc, self.max_windows)
+            if site in self.site_fc_mean:
+                wfc = wfc - self.site_fc_mean[site].astype(np.float32)[None]
+            adj = torch.FloatTensor(
+                self._threshold(wfc, self.preserve_fc_sign).astype(np.float32)
+            )                                                  # (W, N, N)
+
+        elif self.use_dynamic_adj:
+            wfc = self._array(data, "fc_windows", "window_fc").astype(np.float32)
+            wfc = self._pad_or_truncate_windows(wfc, self.max_windows)
+            fc = wfc.mean(axis=0)
+            if site in self.site_fc_mean:
+                fc = fc - self.site_fc_mean[site].astype(np.float32)
+            adj = torch.FloatTensor(
+                self._threshold(fc, self.preserve_fc_sign).astype(np.float32)
+            )                                                  # (N, N)
+
         else:
-            if self.use_dynamic_adj_sequence:
+            # Static per-subject mean FC
+            mean_np = data["mean_fc"].astype(np.float32)
+            if site in self.site_fc_mean:
+                mean_np = mean_np - self.site_fc_mean[site].astype(np.float32)
+            if self.use_fisher_z:
+                mean_np = self._fisher_z(mean_np)
+            mean_np = self._threshold(mean_np, self.preserve_fc_sign).astype(np.float32)
+
+            if self.pca_mean is not None and self.pca_components is not None:
+                # PCA projection: (D,) → (K,)
+                # Extract upper triangle the same way the MLP model does
+                n = mean_np.shape[0]
+                r, c = np.triu_indices(n, k=1)
+                x_vec = mean_np[r, c] - self.pca_mean               # centre
+                x_pca = (self.pca_components @ x_vec).astype(np.float32)  # (K,)
+                # Return as (1, K) so collate_fn stacks to (B, 1, K); model flattens
+                adj = torch.FloatTensor(x_pca).unsqueeze(0)          # (1, K)
+
+            elif self.use_fc_variance:
+                # Second channel: temporal std of FC — captures connection instability
                 wfc = self._array(data, "fc_windows", "window_fc").astype(np.float32)
                 wfc = self._pad_or_truncate_windows(wfc, self.max_windows)
-                # FC-domain site normalization: subtract per-site mean FC
-                if site in self.site_fc_mean:
-                    wfc = wfc - self.site_fc_mean[site].astype(np.float32)[None]
-                adj_np = self._threshold(wfc, self.preserve_fc_sign).astype(np.float32)
-            elif self.use_dynamic_adj:
-                # Mean of per-window FCs
-                wfc = self._array(data, "fc_windows", "window_fc").astype(np.float32)
-                wfc = self._pad_or_truncate_windows(wfc, self.max_windows)
-                fc = wfc.mean(axis=0)
-                if site in self.site_fc_mean:
-                    fc = fc - self.site_fc_mean[site].astype(np.float32)
-                adj_np = self._threshold(fc, self.preserve_fc_sign).astype(np.float32)
+                std_np = wfc.std(axis=0).astype(np.float32)
+                adj = torch.FloatTensor(np.stack([mean_np, std_np], axis=0))  # (2, N, N)
+
             else:
-                adj_np = data["mean_fc"].astype(np.float32)
-                # FC-domain site normalization: subtract per-site mean FC
-                if site in self.site_fc_mean:
-                    adj_np = adj_np - self.site_fc_mean[site].astype(np.float32)
-                adj_np = self._threshold(adj_np, self.preserve_fc_sign).astype(np.float32)
-            adj = torch.FloatTensor(adj_np)
+                adj = torch.FloatTensor(mean_np)               # (N, N)
 
         label = torch.tensor(int(data["label"]), dtype=torch.long)
-        return torch.FloatTensor(bold_windows), adj, label
+        site_id = torch.tensor(self.site_to_int.get(site, -1), dtype=torch.long)
+        return torch.FloatTensor(bold_windows), adj, label, site_id
 
     # ------------------------------------------------------------------
     @property

@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 
 def validate_args(args: argparse.Namespace) -> None:
-    if args.model_name == "fc_mlp" and args.use_population_adj:
+    if args.model_name in ("fc_mlp", "adv_fc_mlp") and args.use_population_adj:
         raise ValueError(
             "fc_mlp needs per-subject connectivity. Re-run with --no-use_population_adj."
         )
@@ -68,9 +68,9 @@ def validate_args(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 def build_datamodule(args: argparse.Namespace) -> ABIDEDataModule:
-    # fc_mlp needs signed FC; auto-enable unless user explicitly set it
+    # fc_mlp variants need signed FC; auto-enable unless user explicitly set it
     preserve_fc_sign = getattr(args, "preserve_fc_sign", False)
-    if args.model_name == "fc_mlp" and not preserve_fc_sign:
+    if args.model_name in ("fc_mlp", "adv_fc_mlp") and not preserve_fc_sign:
         preserve_fc_sign = True
 
     return ABIDEDataModule(
@@ -84,6 +84,9 @@ def build_datamodule(args: argparse.Namespace) -> ABIDEDataModule:
         use_dynamic_adj_sequence=args.use_dynamic_adj_sequence,
         use_population_adj=args.use_population_adj,
         preserve_fc_sign=preserve_fc_sign,
+        use_fc_variance=getattr(args, "use_fc_variance", False),
+        use_fisher_z=getattr(args, "use_fisher_z", False),
+        n_pca_components=getattr(args, "n_pca_components", 0),
         batch_size=args.batch_size,
         val_ratio=args.val_ratio,
         test_ratio=args.test_ratio,
@@ -129,11 +132,16 @@ def build_task(args: argparse.Namespace, dm: ABIDEDataModule) -> ClassificationT
         cosine_t0=args.cosine_t0,
         cosine_t_mult=args.cosine_t_mult,
         cosine_eta_min=args.cosine_eta_min,
+        num_sites=dm.num_sites,
+        adv_site_weight=getattr(args, "adv_site_weight", 1.0),
     )
 
 
 def build_trainer(args: argparse.Namespace) -> tuple[pl.Trainer, Path]:
-    ckpt_dir = Path("checkpoints") / args.model_name
+    ckpt_name = args.model_name
+    if getattr(args, "n_pca_components", 0) > 0:
+        ckpt_name += f"_pca{args.n_pca_components}"
+    ckpt_dir = Path("checkpoints") / ckpt_name
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     
     # Write run config metadata for safe ensemble verification
@@ -209,7 +217,8 @@ def ensemble_predict(
         task.eval().to(device)
         batch_probs: list[torch.Tensor] = []
         with torch.no_grad():
-            for bold_windows, adj, _ in dm.test_dataloader():
+            for batch in dm.test_dataloader():
+                bold_windows, adj = batch[0], batch[1]
                 logits = task(bold_windows.to(device), adj.to(device))
                 batch_probs.append(torch.softmax(logits, dim=-1).cpu())
         all_probs.append(torch.cat(batch_probs, dim=0))
@@ -244,7 +253,7 @@ def train_from_args(
             try:
                 avg_probs = ensemble_predict(ckpt_dir, dm)
                 preds = avg_probs.argmax(dim=-1)
-                # Collect ground-truth labels from test set
+                # Collect ground-truth labels from test set (index 2 regardless of tuple length)
                 labels = torch.cat([b[2] for b in dm.test_dataloader()])
                 acc = (preds == labels).float().mean().item()
                 auc_metric = BinaryAUROC()

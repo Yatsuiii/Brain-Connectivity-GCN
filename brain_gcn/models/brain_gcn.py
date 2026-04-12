@@ -14,6 +14,7 @@ import torch
 from torch import nn
 
 from brain_gcn.utils.graph_conv import calculate_laplacian_with_self_loop, drop_edge
+from brain_gcn.utils.grl import GradientReversal
 
 
 # ---------------------------------------------------------------------------
@@ -292,20 +293,116 @@ class ConnectivityMLPClassifier(nn.Module):
             nn.Linear(hidden_dim, num_classes),
         )
 
+    @staticmethod
+    def _fc_features(adj: torch.Tensor) -> torch.Tensor:
+        """Extract features from adj tensor (various shapes):
+
+        (B, N, N)    → (B, N*(N-1)/2)   signed mean FC upper triangle
+        (B, 2, N, N) → (B, N*(N-1))     mean FC || std FC concatenated
+        (B, 1, K)    → (B, K)           pre-computed PCA features (pass-through)
+        (B, W, N, N) → (B, N*(N-1)/2)   dynamic seq: averaged over windows first
+        """
+        if adj.dim() == 3:
+            if adj.size(1) == 1:
+                # PCA projection already computed in dataset — just flatten
+                return adj.squeeze(1)                        # (B, K)
+            # (B, N, N) — standard case
+            row, col = torch.triu_indices(adj.size(-2), adj.size(-1), offset=1,
+                                          device=adj.device)
+            return adj[:, row, col]                          # (B, 19900)
+
+        if adj.dim() == 4:
+            if adj.size(1) == 2:
+                # [mean_fc, std_fc] channels
+                row, col = torch.triu_indices(adj.size(-2), adj.size(-1), offset=1,
+                                              device=adj.device)
+                x_mean = adj[:, 0, row, col]
+                x_std  = adj[:, 1, row, col]
+                return torch.cat([x_mean, x_std], dim=-1)   # (B, 2*19900)
+            # Dynamic window sequence: average then extract
+            adj = adj.mean(dim=1)                            # (B, N, N)
+            row, col = torch.triu_indices(adj.size(-2), adj.size(-1), offset=1,
+                                          device=adj.device)
+            return adj[:, row, col]
+
+        raise ValueError(f"Unexpected adj shape: {tuple(adj.shape)}")
+
     def forward(
         self,
         bold_windows: torch.Tensor,
         adj: torch.Tensor,
         return_attention: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, None]:
-        if adj.dim() == 4:
-            adj = adj.mean(dim=1)
-        row, col = torch.triu_indices(adj.size(-2), adj.size(-1), offset=1, device=adj.device)
-        x = adj[:, row, col]
+        x = self._fc_features(adj)
         logits = self.net(x)
         if return_attention:
             return logits, None
         return logits
+
+
+class AdversarialConnectivityMLP(nn.Module):
+    """FC-based classifier with adversarial site deconfounding (Ganin et al. 2016).
+
+    Architecture:
+        FC upper triangle (signed)
+            → shared_encoder          # learns site-invariant features
+            ↙                   ↘
+        asd_head              grl(α) → site_head
+        (minimize ASD CE)     (encoder maximises site CE via reversed grads)
+
+    During training the encoder is pulled in two directions:
+      - Minimise ASD classification loss (learn diagnosis signal)
+      - Maximise site classification loss (unlearn scanner fingerprint)
+
+    alpha is annealed 0→1 via ganin_alpha() so site deconfounding
+    ramps up gradually after the ASD signal is first established.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int = 256,
+        num_classes: int = 2,
+        num_sites: int = 17,
+        dropout: float = 0.5,
+    ):
+        super().__init__()
+        # Shared encoder — LazyLinear handles variable FC input size
+        self.encoder = nn.Sequential(
+            nn.LazyLinear(hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+        # ASD classification head
+        self.asd_head = nn.Linear(hidden_dim, num_classes)
+
+        # Site adversarial branch
+        self.grl = GradientReversal(alpha=0.0)   # alpha set externally each epoch
+        self.site_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, num_sites),
+        )
+
+    def forward(
+        self,
+        bold_windows: torch.Tensor,
+        adj: torch.Tensor,
+        return_site_logits: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        x = ConnectivityMLPClassifier._fc_features(adj)
+
+        features = self.encoder(x)
+        asd_logits = self.asd_head(features)
+
+        if return_site_logits:
+            site_logits = self.site_head(self.grl(features))
+            return asd_logits, site_logits
+        return asd_logits
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +413,7 @@ def build_model(
     model_name: str,
     hidden_dim: int = 64,
     num_classes: int = 2,
+    num_sites: int = 1,
     dropout: float = 0.5,
     readout: str = "attention",
     drop_edge_p: float = 0.1,
@@ -328,6 +426,8 @@ def build_model(
         return TemporalGRUClassifier(hidden_dim, num_classes, dropout)
     if model_name == "fc_mlp":
         return ConnectivityMLPClassifier(hidden_dim, num_classes, dropout)
+    if model_name == "adv_fc_mlp":
+        return AdversarialConnectivityMLP(hidden_dim, num_classes, num_sites, dropout)
     # Advanced models — lazy import to avoid circular dependency
     from brain_gcn.models.advanced_models import (
         GATClassifier, TransformerClassifier, CNN3DClassifier, GraphSAGEClassifier,

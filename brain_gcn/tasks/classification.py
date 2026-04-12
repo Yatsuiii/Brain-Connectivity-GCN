@@ -25,6 +25,7 @@ from torchmetrics.classification import (
 )
 
 from brain_gcn.models import build_model
+from brain_gcn.utils.grl import ganin_alpha
 
 
 class ClassificationTask(pl.LightningModule):
@@ -42,33 +43,36 @@ class ClassificationTask(pl.LightningModule):
         cosine_t0: int = 50,
         cosine_t_mult: int = 2,
         cosine_eta_min: float = 1e-5,
+        num_sites: int = 1,
+        adv_site_weight: float = 1.0,
     ):
         """
         Parameters
         ----------
-        class_weights   : 1-D tensor of length num_classes for weighted CE.
-                          Typically [total/(2*n_td), total/(2*n_asd)].
-                          None = unweighted (original behaviour).
-        bold_noise_std  : std dev of Gaussian noise added to bold_windows
-                          during training. 0.0 disables augmentation.
-        drop_edge_p     : edge drop probability forwarded to graph models.
-        cosine_t0       : CosineAnnealingWarmRestarts first restart epoch.
-        cosine_t_mult   : restart interval multiplier.
-        cosine_eta_min  : minimum LR after annealing.
+        class_weights    : 1-D tensor of length num_classes for weighted CE.
+        bold_noise_std   : std dev of Gaussian noise added during training.
+        drop_edge_p      : edge drop probability for graph models.
+        cosine_t0        : CosineAnnealingWarmRestarts first restart epoch.
+        cosine_t_mult    : restart interval multiplier.
+        cosine_eta_min   : minimum LR after annealing.
+        num_sites        : number of acquisition sites (for adv_fc_mlp).
+        adv_site_weight  : weight on the adversarial site loss term.
         """
         super().__init__()
         self.save_hyperparameters(ignore=["class_weights"])
-        # Store class_weights separately (tensors don't serialise cleanly via hparams)
         self.register_buffer("class_weights", class_weights)
 
         self.model = build_model(
             model_name=model_name,
             hidden_dim=hidden_dim,
+            num_sites=num_sites,
             dropout=dropout,
             readout=readout,
             drop_edge_p=drop_edge_p,
         )
         self.loss_fn = nn.CrossEntropyLoss(weight=class_weights)
+        # Site cross-entropy — unweighted (sites roughly balanced)
+        self.site_loss_fn = nn.CrossEntropyLoss(ignore_index=-1)
 
         # --- Metrics --------------------------------------------------------
         self.train_acc = BinaryAccuracy()
@@ -85,12 +89,16 @@ class ClassificationTask(pl.LightningModule):
         self.test_sens = BinaryRecall()
         self.test_spec = BinarySpecificity()
 
+    @property
+    def _is_adversarial(self) -> bool:
+        return self.hparams.model_name == "adv_fc_mlp"
+
     # ------------------------------------------------------------------
     def forward(self, bold_windows: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
         return self.model(bold_windows, adj)
 
     def _step(self, batch, stage: str) -> torch.Tensor:
-        bold_windows, adj, labels = batch
+        bold_windows, adj, labels, site_ids = batch
         logits = self(bold_windows, adj)
         loss = self.loss_fn(logits, labels)
         probs = torch.softmax(logits, dim=-1)[:, 1]
@@ -129,14 +137,39 @@ class ClassificationTask(pl.LightningModule):
         return loss
 
     def training_step(self, batch, batch_idx: int) -> torch.Tensor:
-        bold_windows, adj, labels = batch
-        # Relative BOLD noise augmentation (training only)
-        # Noise std is proportional to per-sample signal std for consistent augmentation
+        bold_windows, adj, labels, site_ids = batch
         if self.hparams.bold_noise_std > 0.0:
             signal_std = bold_windows.std(dim=(1, 2), keepdim=True).detach()
             noise = torch.randn_like(bold_windows) * self.hparams.bold_noise_std * signal_std
             bold_windows = bold_windows + noise
-        return self._step((bold_windows, adj, labels), "train")
+
+        if self._is_adversarial:
+            # Dual loss: ASD classification + adversarial site deconfounding
+            asd_logits, site_logits = self.model(
+                bold_windows, adj, return_site_logits=True
+            )
+            asd_loss  = self.loss_fn(asd_logits, labels)
+            site_loss = self.site_loss_fn(site_logits, site_ids)
+            loss = asd_loss + self.hparams.adv_site_weight * site_loss
+
+            probs = torch.softmax(asd_logits, dim=-1)[:, 1]
+            preds = torch.argmax(asd_logits, dim=-1)
+
+            self.log("train_asd_loss",  asd_loss,  prog_bar=False, on_epoch=True, on_step=False)
+            self.log("train_site_loss", site_loss, prog_bar=False, on_epoch=True, on_step=False)
+            self.log("train_loss", loss, prog_bar=True, on_epoch=True, on_step=False)
+            self.train_acc.update(preds, labels)
+            self.log("train_acc", self.train_acc, prog_bar=True, on_epoch=True, on_step=False)
+            return loss
+
+        return self._step((bold_windows, adj, labels, site_ids), "train")
+
+    def on_train_epoch_start(self) -> None:
+        """Anneal the GRL alpha at the start of each epoch."""
+        if self._is_adversarial:
+            alpha = ganin_alpha(self.current_epoch, self.trainer.max_epochs)
+            self.model.grl.alpha = alpha
+            self.log("grl_alpha", alpha, prog_bar=False, on_epoch=True, on_step=False)
 
     def validation_step(self, batch, batch_idx: int) -> torch.Tensor:
         return self._step(batch, "val")
@@ -171,10 +204,13 @@ class ClassificationTask(pl.LightningModule):
         parser.add_argument("--readout", choices=["mean", "attention"], default="attention")
         parser.add_argument(
             "--model_name",
-            choices=["graph_temporal", "gcn", "gru", "fc_mlp", "gat", "transformer", "cnn3d", "graphsage"],
+            choices=["graph_temporal", "gcn", "gru", "fc_mlp", "adv_fc_mlp",
+                     "gat", "transformer", "cnn3d", "graphsage"],
             default="graph_temporal",
         )
         parser.add_argument("--lr", type=float, default=1e-3)
+        parser.add_argument("--adv_site_weight", type=float, default=1.0,
+                            help="Weight on adversarial site loss (adv_fc_mlp only).")
         parser.add_argument("--weight_decay", type=float, default=1e-4)
         parser.add_argument("--bold_noise_std", type=float, default=0.01)
         parser.add_argument("--drop_edge_p", type=float, default=0.1)

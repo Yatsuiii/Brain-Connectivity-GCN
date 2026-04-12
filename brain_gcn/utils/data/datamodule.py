@@ -39,17 +39,19 @@ log = logging.getLogger(__name__)
 
 def collate_fn(batch):
     """
-    Custom collate: stack bold_windows and labels; keep adj as-is (all same shape).
+    Custom collate: stack bold_windows, labels, and site_ids; keep adj as-is.
     Returns:
         bold_windows : (B, W, N)
         adj         : (B, N, N)
         labels      : (B,)
+        site_ids    : (B,)
     """
-    bold_windowss, adjs, labels = zip(*batch)
+    bold_windowss, adjs, labels, site_ids = zip(*batch)
     return (
         torch.stack(bold_windowss),
         torch.stack(adjs),
         torch.stack(labels),
+        torch.stack(site_ids),
     )
 
 
@@ -66,6 +68,9 @@ class ABIDEDataModule(pl.LightningDataModule):
         use_dynamic_adj_sequence: bool = False,
         use_population_adj: bool = True,
         preserve_fc_sign: bool = False,
+        use_fc_variance: bool = False,
+        use_fisher_z: bool = False,
+        n_pca_components: int = 0,
         batch_size: int = 32,
         val_ratio: float = 0.1,
         test_ratio: float = 0.1,
@@ -115,6 +120,9 @@ class ABIDEDataModule(pl.LightningDataModule):
         self.use_dynamic_adj_sequence = use_dynamic_adj_sequence
         self.use_population_adj = use_population_adj
         self.preserve_fc_sign = preserve_fc_sign
+        self.use_fc_variance = use_fc_variance
+        self.use_fisher_z = use_fisher_z
+        self.n_pca_components = n_pca_components
         self.batch_size = batch_size
         self.val_ratio = val_ratio
         self.test_ratio = test_ratio
@@ -127,6 +135,9 @@ class ABIDEDataModule(pl.LightningDataModule):
 
         self._population_adj: np.ndarray | None = None
         self._site_fc_mean: dict[str, np.ndarray] = {}
+        self._site_to_int: dict[str, int] = {}
+        self._pca_mean: np.ndarray | None = None        # (D,) mean FC vector
+        self._pca_components: np.ndarray | None = None  # (K, D) principal axes
         self._train_paths: list[Path] = []
         self._val_paths: list[Path] = []
         self._test_paths: list[Path] = []
@@ -189,6 +200,12 @@ class ABIDEDataModule(pl.LightningDataModule):
             str(np.load(p, allow_pickle=True)["site"]) for p in all_paths
         ])
 
+        # Build site → int mapping from ALL subjects (consistent across splits)
+        self._site_to_int = {
+            site: i for i, site in enumerate(sorted(set(sites.tolist())))
+        }
+        log.info("Sites (%d): %s", len(self._site_to_int), sorted(self._site_to_int))
+
         if self.split_strategy == "stratified":
             train_paths, val_paths, test_paths = self._stratified_split(
                 all_paths, labels, self.val_ratio, self.test_ratio
@@ -215,6 +232,10 @@ class ABIDEDataModule(pl.LightningDataModule):
 
         # Compute per-site mean FC from training set (FC-domain site normalization)
         self._site_fc_mean = self._build_site_fc_mean(train_paths)
+
+        # PCA on training FC upper triangles (reduces p>>n overfitting)
+        if self.n_pca_components > 0:
+            self._pca_mean, self._pca_components = self._build_pca(train_paths)
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(
@@ -282,7 +303,16 @@ class ABIDEDataModule(pl.LightningDataModule):
             max_windows=self.max_windows,
             site_fc_mean=self._site_fc_mean,
             preserve_fc_sign=self.preserve_fc_sign,
+            site_to_int=self._site_to_int,
+            use_fc_variance=self.use_fc_variance,
+            use_fisher_z=self.use_fisher_z,
+            pca_mean=self._pca_mean,
+            pca_components=self._pca_components,
         )
+
+    @property
+    def num_sites(self) -> int:
+        return len(self._site_to_int)
 
     @staticmethod
     def _stratified_split(
@@ -355,6 +385,54 @@ class ABIDEDataModule(pl.LightningDataModule):
                 f"{split_name} split must contain both labels, got {sorted(unique)}."
             )
 
+    def _build_pca(self, train_paths: list[Path]) -> tuple[np.ndarray, np.ndarray]:
+        """Compute PCA on training-set FC upper triangles using truncated SVD.
+
+        Returns
+        -------
+        mean_vec   : (D,)   mean FC vector (for centering)
+        components : (K, D) top-K principal axes (rows = PCs)
+
+        With D=19900 features and N≈660 training subjects, PCA reduces to the
+        N-1 dimensional subspace anyway. Using K<<N avoids p>>n overfitting:
+        the MLP trains on K features rather than 19900.
+        """
+        K = self.n_pca_components
+        log.info("Computing PCA (K=%d) from %d training FC matrices ...", K, len(train_paths))
+
+        # Build training matrix: (N_train, D)
+        rows = []
+        for p in train_paths:
+            data = np.load(p, allow_pickle=True)
+            fc = data["mean_fc"].astype(np.float32)
+            n = fc.shape[0]
+            r, c = np.triu_indices(n, k=1)
+            if self.use_fisher_z:
+                fc = np.arctanh(np.clip(fc, -0.9999, 0.9999))
+            rows.append(fc[r, c])
+
+        X = np.stack(rows, axis=0)          # (N_train, D)
+        mean_vec = X.mean(axis=0)           # (D,)
+        X_centered = X - mean_vec           # (N_train, D)
+
+        # Truncated SVD via economy SVD on the smaller dimension
+        # X = U S Vt  →  principal components = Vt[:K]
+        # Since N << D, use X @ Xt for the eigen-decomposition shortcut
+        # (N_train × N_train covariance, then recover Vt)
+        C = (X_centered @ X_centered.T) / (len(train_paths) - 1)   # (N, N)
+        eigenvalues, U = np.linalg.eigh(C)                          # ascending
+        # eigh returns ascending; we want descending
+        idx = np.argsort(-eigenvalues)
+        U = U[:, idx[:K]]                                            # (N, K)
+        components = (X_centered.T @ U)                              # (D, K)
+        # Normalise each column to unit length → rows of Vt
+        components /= np.linalg.norm(components, axis=0, keepdims=True) + 1e-8
+        components = components.T.astype(np.float32)                 # (K, D)
+
+        var_explained = eigenvalues[idx[:K]].sum() / (eigenvalues.sum() + 1e-8)
+        log.info("PCA: top-%d components explain %.1f%% of FC variance.", K, 100 * var_explained)
+        return mean_vec.astype(np.float32), components
+
     def _build_site_fc_mean(self, train_paths: list[Path]) -> dict[str, np.ndarray]:
         """Compute per-site mean FC matrix (N, N) from training subjects.
         Subtracting this at load time removes scanner-specific connectivity biases
@@ -406,6 +484,12 @@ class ABIDEDataModule(pl.LightningDataModule):
         parser.add_argument("--use_population_adj", action=argparse.BooleanOptionalAction, default=True)
         parser.add_argument("--preserve_fc_sign", action="store_true",
                             help="Keep signed FC values in adjacency (required for fc_mlp).")
+        parser.add_argument("--use_fc_variance", action="store_true",
+                            help="Append std(fc_windows) as a second feature channel alongside mean FC.")
+        parser.add_argument("--use_fisher_z", action="store_true",
+                            help="Apply Fisher r-to-z transform to FC values before classification.")
+        parser.add_argument("--n_pca_components", type=int, default=0,
+                            help="If >0, reduce FC to this many PCA components before the MLP.")
         parser.add_argument("--batch_size", type=int, default=32)
         parser.add_argument("--val_ratio", type=float, default=0.1)
         parser.add_argument("--test_ratio", type=float, default=0.1)
