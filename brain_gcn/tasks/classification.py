@@ -45,6 +45,10 @@ class ClassificationTask(pl.LightningModule):
         cosine_eta_min: float = 1e-5,
         num_sites: int = 1,
         adv_site_weight: float = 1.0,
+        num_nodes: int = 200,
+        num_modes: int = 16,
+        orth_weight: float = 0.01,
+        mode_init: "torch.Tensor | None" = None,
     ):
         """
         Parameters
@@ -59,16 +63,19 @@ class ClassificationTask(pl.LightningModule):
         adv_site_weight  : weight on the adversarial site loss term.
         """
         super().__init__()
-        self.save_hyperparameters(ignore=["class_weights"])
+        self.save_hyperparameters(ignore=["class_weights", "mode_init"])
         self.register_buffer("class_weights", class_weights)
 
         self.model = build_model(
             model_name=model_name,
             hidden_dim=hidden_dim,
             num_sites=num_sites,
+            num_nodes=num_nodes,
+            num_modes=num_modes,
             dropout=dropout,
             readout=readout,
             drop_edge_p=drop_edge_p,
+            mode_init=mode_init,
         )
         self.loss_fn = nn.CrossEntropyLoss(weight=class_weights)
         # Site cross-entropy — unweighted (sites roughly balanced)
@@ -160,9 +167,16 @@ class ClassificationTask(pl.LightningModule):
             self.log("train_loss", loss, prog_bar=True, on_epoch=True, on_step=False)
             self.train_acc.update(preds, labels)
             self.log("train_acc", self.train_acc, prog_bar=True, on_epoch=True, on_step=False)
-            return loss
+        else:
+            loss = self._step((bold_windows, adj, labels, site_ids), "train")
 
-        return self._step((bold_windows, adj, labels, site_ids), "train")
+        # Orthogonality regularization — BMN only (model exposes orthogonality_loss())
+        if hasattr(self.model, "orthogonality_loss") and self.hparams.orth_weight > 0.0:
+            orth = self.model.orthogonality_loss()
+            loss = loss + self.hparams.orth_weight * orth
+            self.log("train_orth_loss", orth, prog_bar=False, on_epoch=True, on_step=False)
+
+        return loss
 
     def on_train_epoch_start(self) -> None:
         """Anneal the GRL alpha at the start of each epoch."""
@@ -205,7 +219,7 @@ class ClassificationTask(pl.LightningModule):
         parser.add_argument(
             "--model_name",
             choices=["graph_temporal", "gcn", "gru", "fc_mlp", "adv_fc_mlp",
-                     "gat", "transformer", "cnn3d", "graphsage"],
+                     "gat", "transformer", "cnn3d", "graphsage", "brain_mode"],
             default="graph_temporal",
         )
         parser.add_argument("--lr", type=float, default=1e-3)
@@ -219,4 +233,8 @@ class ClassificationTask(pl.LightningModule):
                            help="CosineAnnealingWarmRestarts restart interval multiplier")
         parser.add_argument("--cosine_eta_min", type=float, default=1e-5,
                            help="CosineAnnealingWarmRestarts minimum learning rate")
+        parser.add_argument("--num_modes", type=int, default=16,
+                           help="Brain Mode Network: number of learnable modes K")
+        parser.add_argument("--orth_weight", type=float, default=0.01,
+                           help="Brain Mode Network: orthogonality regularization weight")
         return parser

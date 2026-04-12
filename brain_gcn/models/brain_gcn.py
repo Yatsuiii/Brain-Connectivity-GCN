@@ -340,6 +340,156 @@ class ConnectivityMLPClassifier(nn.Module):
         return logits
 
 
+class BrainModeNetwork(nn.Module):
+    """
+    Novel architecture: Brain Mode Network (BMN).
+
+    Learns K 'brain modes' — directions in ROI space (v_k ∈ R^N).
+    Projects the N×N FC matrix into a compact K×K 'mode interaction matrix':
+
+        M_kl = v_k^T · FC · v_l
+
+    Diagonal M_kk measures connectivity energy along mode k (Rayleigh quotient).
+    Off-diagonal M_kl captures cross-mode coupling between networks.
+
+    With K=16 modes and N=200 ROIs: 136 features instead of 19,900.
+    Inductive bias: each mode can specialize to a brain network community
+    (e.g. DMN, FPN, SMN) — the model learns which communities matter for ASD.
+
+    Orthogonality regularization keeps modes diverse (callable via
+    orthogonality_loss(), weight controlled externally in the training task).
+    """
+
+    def __init__(
+        self,
+        num_nodes: int,
+        num_modes: int = 16,
+        hidden_dim: int = 64,
+        num_classes: int = 2,
+        dropout: float = 0.5,
+        mode_init: torch.Tensor | None = None,
+    ):
+        super().__init__()
+        self.num_modes = num_modes
+        self.num_nodes = num_nodes
+
+        # Learnable modes: K × N — default initialization is near-orthonormal via QR.
+        # Caller may pass a (K, N) tensor from discriminative_init() instead.
+        if mode_init is not None:
+            modes_init = mode_init.clone().float()
+        else:
+            modes_init_np = torch.randn(num_nodes, num_modes)
+            Q, _ = torch.linalg.qr(modes_init_np)      # (N, K) orthonormal columns
+            modes_init = Q.T.contiguous()               # (K, N)
+        self.modes = nn.Parameter(modes_init)
+
+        # Features: K(K+1)/2 from static M  +  K from temporal std(A_k)
+        num_fc_features = num_modes * (num_modes + 1) // 2
+        num_total_features = num_fc_features + num_modes   # static + dynamic
+
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(num_total_features),
+            nn.Linear(num_total_features, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, num_classes),
+        )
+
+    def forward(
+        self,
+        bold_windows: torch.Tensor,
+        adj: torch.Tensor,
+        return_attention: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, None]:
+        # adj: (B, N, N) signed FC matrix; also accept (B, W, N, N) → avg over W
+        if adj.dim() == 4:
+            adj = adj.mean(dim=1)                            # (B, N, N)
+
+        # ── Static stream: mode interaction matrix ──────────────────────────
+        # M_kl = v_k^T · FC · v_l  →  (B, K, K)
+        M = torch.einsum('kn,bnm,lm->bkl', self.modes, adj, self.modes)
+
+        # Extract upper triangle (including diagonal): K(K+1)/2 features
+        r, c = torch.triu_indices(self.num_modes, self.num_modes,
+                                  offset=0, device=adj.device)
+        fc_features = M[:, r, c]                            # (B, K(K+1)/2)
+
+        # ── Dynamic stream: temporal variability of mode activity ───────────
+        # A_k(t) = v_k · bold(t)  →  A: (B, W, K)
+        # std(A_k) captures how much each network fluctuates over time.
+        # This is genuinely new information not present in static mean FC.
+        A = torch.einsum('kn,bwn->bwk', self.modes, bold_windows)  # (B, W, K)
+        dyn_features = A.std(dim=1)                         # (B, K)
+
+        features = torch.cat([fc_features, dyn_features], dim=-1)  # (B, K(K+1)/2+K)
+
+        logits = self.classifier(features)
+        if return_attention:
+            return logits, None
+        return logits
+
+    def orthogonality_loss(self) -> torch.Tensor:
+        """Penalise non-orthonormal modes: ||V_norm @ V_norm^T - I||_F^2 / K^2.
+
+        Encourages each mode to capture a distinct connectivity direction.
+        Dividing by K^2 keeps the loss scale independent of num_modes.
+        """
+        V_norm = self.modes / (self.modes.norm(dim=1, keepdim=True) + 1e-8)
+        gram = V_norm @ V_norm.T                            # (K, K)
+        I = torch.eye(self.num_modes, device=gram.device, dtype=gram.dtype)
+        return ((gram - I) ** 2).mean()
+
+    @staticmethod
+    def discriminative_init(
+        train_fc_asd: "np.ndarray",
+        train_fc_td: "np.ndarray",
+        num_modes: int,
+    ) -> "torch.Tensor":
+        """Initialize modes from SVD of the ASD-TD mean FC difference matrix.
+
+        The k-th left singular vector of (mean_FC_ASD − mean_FC_TD) is the k-th
+        most discriminative direction in ROI space — the direction along which the
+        two classes differ most. Starting here gives the optimizer a head start
+        and reduces the number of epochs needed to learn discriminative modes.
+
+        Parameters
+        ----------
+        train_fc_asd : (n_asd, N, N) FC matrices for ASD training subjects
+        train_fc_td  : (n_td,  N, N) FC matrices for TD training subjects
+        num_modes    : K — number of singular vectors to keep
+
+        Returns
+        -------
+        modes : (K, N) float32 tensor — orthonormal initial modes
+        """
+        import numpy as np
+
+        mu_asd = train_fc_asd.mean(axis=0)               # (N, N)
+        mu_td  = train_fc_td.mean(axis=0)                # (N, N)
+        delta  = mu_asd - mu_td                          # ASD-TD difference
+
+        # SVD of the difference matrix: left singular vectors are ROI directions
+        # that best explain the connectivity difference between groups.
+        U, _, _ = np.linalg.svd(delta, full_matrices=True)
+
+        K = min(num_modes, U.shape[1])
+        modes = U[:, :K].T.astype(np.float32)            # (K, N)
+
+        # If K > available singular vectors (shouldn't happen for N=200, K<<200),
+        # pad with QR-orthogonalized random directions
+        if num_modes > K:
+            extra = np.random.randn(num_modes - K, U.shape[0]).astype(np.float32)
+            for i in range(len(extra)):
+                for row in modes:
+                    extra[i] -= np.dot(extra[i], row) * row
+                n = np.linalg.norm(extra[i])
+                if n > 1e-8:
+                    extra[i] /= n
+            modes = np.concatenate([modes, extra], axis=0)
+
+        return torch.from_numpy(modes)
+
+
 class AdversarialConnectivityMLP(nn.Module):
     """FC-based classifier with adversarial site deconfounding (Ganin et al. 2016).
 
@@ -414,9 +564,12 @@ def build_model(
     hidden_dim: int = 64,
     num_classes: int = 2,
     num_sites: int = 1,
+    num_nodes: int = 200,
+    num_modes: int = 16,
     dropout: float = 0.5,
     readout: str = "attention",
     drop_edge_p: float = 0.1,
+    mode_init: "torch.Tensor | None" = None,
 ) -> nn.Module:
     if model_name == "graph_temporal":
         return BrainGCNClassifier(hidden_dim, num_classes, dropout, readout, drop_edge_p)
@@ -428,6 +581,9 @@ def build_model(
         return ConnectivityMLPClassifier(hidden_dim, num_classes, dropout)
     if model_name == "adv_fc_mlp":
         return AdversarialConnectivityMLP(hidden_dim, num_classes, num_sites, dropout)
+    if model_name == "brain_mode":
+        return BrainModeNetwork(num_nodes, num_modes, hidden_dim, num_classes, dropout,
+                                mode_init=mode_init)
     # Advanced models — lazy import to avoid circular dependency
     from brain_gcn.models.advanced_models import (
         GATClassifier, TransformerClassifier, CNN3DClassifier, GraphSAGEClassifier,

@@ -21,6 +21,7 @@ import torch
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from torchmetrics.classification import BinaryAUROC
 
+from brain_gcn.models.brain_gcn import BrainModeNetwork
 from brain_gcn.tasks import ClassificationTask
 from brain_gcn.utils.data.datamodule import ABIDEDataModule
 
@@ -53,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 
 def validate_args(args: argparse.Namespace) -> None:
-    if args.model_name in ("fc_mlp", "adv_fc_mlp") and args.use_population_adj:
+    if args.model_name in ("fc_mlp", "adv_fc_mlp", "brain_mode") and args.use_population_adj:
         raise ValueError(
             "fc_mlp needs per-subject connectivity. Re-run with --no-use_population_adj."
         )
@@ -70,7 +71,7 @@ def validate_args(args: argparse.Namespace) -> None:
 def build_datamodule(args: argparse.Namespace) -> ABIDEDataModule:
     # fc_mlp variants need signed FC; auto-enable unless user explicitly set it
     preserve_fc_sign = getattr(args, "preserve_fc_sign", False)
-    if args.model_name in ("fc_mlp", "adv_fc_mlp") and not preserve_fc_sign:
+    if args.model_name in ("fc_mlp", "adv_fc_mlp", "brain_mode") and not preserve_fc_sign:
         preserve_fc_sign = True
 
     return ABIDEDataModule(
@@ -110,6 +111,25 @@ def _compute_class_weights(dm: ABIDEDataModule) -> torch.Tensor:
     return torch.tensor([w_td, w_asd], dtype=torch.float32)
 
 
+def _discriminative_mode_init(dm: ABIDEDataModule, num_modes: int) -> torch.Tensor:
+    """Load training FCs by class and compute SVD-based discriminative modes.
+
+    Called only when model_name == 'brain_mode'. Reads the cached .npz files
+    to compute (mean_FC_ASD − mean_FC_TD) and returns the top-K left singular
+    vectors as the initial mode matrix (K, N).
+    """
+    fc_asd, fc_td = [], []
+    for p in dm._train_paths:
+        data = np.load(p, allow_pickle=True)
+        fc   = data["mean_fc"].astype(np.float32)
+        lbl  = int(data["label"])
+        (fc_asd if lbl == 1 else fc_td).append(fc)
+
+    fc_asd_arr = np.stack(fc_asd)   # (n_asd, N, N)
+    fc_td_arr  = np.stack(fc_td)    # (n_td,  N, N)
+    return BrainModeNetwork.discriminative_init(fc_asd_arr, fc_td_arr, num_modes)
+
+
 def build_task(args: argparse.Namespace, dm: ABIDEDataModule) -> ClassificationTask:
     """Build ClassificationTask with class weights from the training split."""
     # dm.setup() must have been called before this
@@ -118,6 +138,13 @@ def build_task(args: argparse.Namespace, dm: ABIDEDataModule) -> ClassificationT
     except Exception:
         # Fallback: no weighting (e.g. during smoke tests before full setup)
         class_weights = None
+
+    mode_init = None
+    if args.model_name == "brain_mode":
+        try:
+            mode_init = _discriminative_mode_init(dm, getattr(args, "num_modes", 16))
+        except Exception as exc:
+            print(f"[BMN] discriminative init failed ({exc}), using QR init.")
 
     return ClassificationTask(
         hidden_dim=args.hidden_dim,
@@ -134,6 +161,10 @@ def build_task(args: argparse.Namespace, dm: ABIDEDataModule) -> ClassificationT
         cosine_eta_min=args.cosine_eta_min,
         num_sites=dm.num_sites,
         adv_site_weight=getattr(args, "adv_site_weight", 1.0),
+        num_nodes=dm.num_nodes,
+        num_modes=getattr(args, "num_modes", 16),
+        orth_weight=getattr(args, "orth_weight", 0.01),
+        mode_init=mode_init,
     )
 
 
@@ -141,6 +172,9 @@ def build_trainer(args: argparse.Namespace) -> tuple[pl.Trainer, Path]:
     ckpt_name = args.model_name
     if getattr(args, "n_pca_components", 0) > 0:
         ckpt_name += f"_pca{args.n_pca_components}"
+    if args.model_name == "brain_mode":
+        split_tag = getattr(args, "split_strategy", "site_holdout")[:4]  # e.g. "site" or "stra"
+        ckpt_name += f"_k{getattr(args, 'num_modes', 16)}_{split_tag}"
     ckpt_dir = Path("checkpoints") / ckpt_name
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     
