@@ -17,6 +17,9 @@ lightning_logs/
 # Root-level process logs (large, not useful)
 /*.log
 
+# Reference implementations (tracked separately if needed)
+references/
+
 # Editors
 .vscode/
 .idea/
