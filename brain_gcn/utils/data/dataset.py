@@ -39,6 +39,8 @@ class ABIDEDataset(Dataset):
         use_fisher_z: bool = False,
         pca_mean: np.ndarray | None = None,
         pca_components: np.ndarray | None = None,
+        use_fc_degree_features: bool = False,
+        use_fc_row_features: bool = False,
     ):
         """
         Parameters
@@ -62,6 +64,19 @@ class ABIDEDataset(Dataset):
                           of converting to |FC|. Required for fc_mlp which uses
                           signed correlations as direct features (anti-correlations
                           between brain networks are diagnostically relevant).
+        use_fc_degree_features: if True, replace stored bold_windows (std of
+                          z-scored BOLD ≈ 1.0) with per-window per-ROI mean
+                          absolute FC: np.abs(fc_windows).mean(axis=-1). This
+                          gives each ROI a scalar ≈ its average connectivity
+                          strength in that window — directly discriminative
+                          between ASD and TD, unlike BOLD std which is near-
+                          constant after z-scoring.
+        use_fc_row_features: if True, use per-window FC rows as node features
+                          instead of scalar BOLD std. Returns (W, N, N) where
+                          node i's feature vector is its full connectivity profile
+                          fc_windows[w, i, :]. This is the standard formulation
+                          in brain GCN literature (BrainNetCNN, BrainGNN, STAGIN).
+                          Requires model to be built with in_features=num_nodes.
         """
         self.npz_paths = [Path(p) for p in npz_paths]
         self.population_adj = (
@@ -78,6 +93,8 @@ class ABIDEDataset(Dataset):
         self.use_fisher_z = use_fisher_z
         self.pca_mean = pca_mean
         self.pca_components = pca_components
+        self.use_fc_degree_features = use_fc_degree_features
+        self.use_fc_row_features = use_fc_row_features
 
         # Pre-load labels + window counts for fast access without loading full arrays
         self._meta = self._scan_metadata()
@@ -141,19 +158,36 @@ class ABIDEDataset(Dataset):
     def __getitem__(self, idx: int):
         data = np.load(self.npz_paths[idx], allow_pickle=True)
 
-        # Node feature sequence: (W, N)
-        bold_windows = self._array(data, "bold_windows", "window_bold").astype(np.float32)
-        bold_windows = self._pad_or_truncate_windows(bold_windows, self.max_windows)
-
         site = str(data["site"])
+
+        # Pre-load fc_windows if needed for node features or dynamic adjacency
+        _wfc_loaded: np.ndarray | None = None
+        if self.use_fc_row_features or self.use_fc_degree_features or self.use_dynamic_adj_sequence or self.use_dynamic_adj:
+            _wfc_loaded = self._array(data, "fc_windows", "window_fc").astype(np.float32)
+
+        # Node feature sequence
+        if self.use_fc_row_features and _wfc_loaded is not None:
+            # FC rows as node features: (W, N, N) — each node i gets fc_windows[w, i, :]
+            # This is the standard brain GCN formulation (BrainNetCNN, BrainGNN, STAGIN).
+            bold_windows = self._pad_or_truncate_windows(_wfc_loaded, self.max_windows)
+        elif self.use_fc_degree_features and _wfc_loaded is not None:
+            # Per-window per-ROI mean |FC| after site correction (W, N)
+            wfc = self._pad_or_truncate_windows(_wfc_loaded, self.max_windows)
+            if site in self.site_fc_mean:
+                wfc = wfc - self.site_fc_mean[site].astype(np.float32)[None]
+            bold_windows = np.abs(wfc).mean(axis=-1)
+            bold_windows = self._pad_or_truncate_windows(bold_windows, self.max_windows)
+        else:
+            bold_windows = self._array(data, "bold_windows", "window_bold").astype(np.float32)
+            bold_windows = self._pad_or_truncate_windows(bold_windows, self.max_windows)
 
         # Adjacency
         if self.population_adj is not None:
             adj = self.population_adj                          # (N, N) shared
 
         elif self.use_dynamic_adj_sequence:
-            wfc = self._array(data, "fc_windows", "window_fc").astype(np.float32)
-            wfc = self._pad_or_truncate_windows(wfc, self.max_windows)
+            assert _wfc_loaded is not None
+            wfc = self._pad_or_truncate_windows(_wfc_loaded, self.max_windows)
             if site in self.site_fc_mean:
                 wfc = wfc - self.site_fc_mean[site].astype(np.float32)[None]
             adj = torch.FloatTensor(
@@ -161,8 +195,8 @@ class ABIDEDataset(Dataset):
             )                                                  # (W, N, N)
 
         elif self.use_dynamic_adj:
-            wfc = self._array(data, "fc_windows", "window_fc").astype(np.float32)
-            wfc = self._pad_or_truncate_windows(wfc, self.max_windows)
+            assert _wfc_loaded is not None
+            wfc = self._pad_or_truncate_windows(_wfc_loaded, self.max_windows)
             fc = wfc.mean(axis=0)
             if site in self.site_fc_mean:
                 fc = fc - self.site_fc_mean[site].astype(np.float32)

@@ -67,14 +67,16 @@ class TwoLayerGCN(nn.Module):
 class GraphTemporalEncoder(nn.Module):
     """Graph-aware temporal encoder for ROI-level window sequences.
 
-    Vectorized implementation:
-      Reshape bold_windows to (B*W, N, 1) for a single batched GCN pass.
-      Then reshape back and apply node-major GRU.
+    Supports two node feature modes:
+      - Scalar (in_features=1): bold_windows (B, W, N) — BOLD std per window
+      - FC rows (in_features=N): fc_windows (B, W, N, N) — connectivity profile per node
+
+    Vectorized implementation: single batched GCN pass over all windows.
     """
 
-    def __init__(self, hidden_dim: int = 64, dropout: float = 0.1):
+    def __init__(self, hidden_dim: int = 64, dropout: float = 0.1, in_features: int = 1):
         super().__init__()
-        self.input_graph = TwoLayerGCN(1, hidden_dim, dropout=min(dropout, 0.1))
+        self.input_graph = TwoLayerGCN(in_features, hidden_dim, dropout=min(dropout, 0.1))
         self.gru = nn.GRU(
             input_size=hidden_dim,
             hidden_size=hidden_dim,
@@ -84,18 +86,20 @@ class GraphTemporalEncoder(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, bold_windows: torch.Tensor, adj_norm: torch.Tensor) -> torch.Tensor:
-        # bold_windows: (B, W, N)
-        batch_size, num_windows, num_nodes = bold_windows.shape
-
-        # Vectorized: reshape to (B*W, N, 1) for single GCN pass
-        x = bold_windows.reshape(batch_size * num_windows, num_nodes, 1)  # (B*W, N, 1)
+        # bold_windows: (B, W, N) for scalar features or (B, W, N, N) for FC-row features
+        if bold_windows.dim() == 4:
+            # FC-row features: (B, W, N, N) → (B*W, N, N) where last dim is in_features
+            batch_size, num_windows, num_nodes, _ = bold_windows.shape
+            x = bold_windows.reshape(batch_size * num_windows, num_nodes, -1)
+        else:
+            # Scalar features: (B, W, N) → (B*W, N, 1)
+            batch_size, num_windows, num_nodes = bold_windows.shape
+            x = bold_windows.reshape(batch_size * num_windows, num_nodes, 1)
 
         # Handle both 3D (B,N,N) and 4D (B,W,N,N) adjacency
         if adj_norm.dim() == 4:
-            # (B, W, N, N) → (B*W, N, N)
             adj_flat = adj_norm.reshape(batch_size * num_windows, num_nodes, num_nodes)
         else:
-            # (B, N, N) → replicate for all windows
             adj_flat = adj_norm.unsqueeze(1).expand(-1, num_windows, -1, -1)
             adj_flat = adj_flat.reshape(batch_size * num_windows, num_nodes, num_nodes)
 
@@ -168,12 +172,13 @@ class BrainGCNClassifier(nn.Module):
         dropout: float = 0.5,
         readout: str = "attention",
         drop_edge_p: float = 0.1,
+        in_features: int = 1,
     ):
         super().__init__()
         if readout not in {"mean", "attention"}:
             raise ValueError("readout must be 'mean' or 'attention'")
 
-        self.encoder = GraphTemporalEncoder(hidden_dim=hidden_dim, dropout=min(dropout, 0.2))
+        self.encoder = GraphTemporalEncoder(hidden_dim=hidden_dim, dropout=min(dropout, 0.2), in_features=in_features)
         self.readout = readout
         self.attention = AttentionReadout(hidden_dim) if readout == "attention" else None
         self.head = make_classifier_head(hidden_dim, num_classes, dropout)
@@ -679,9 +684,10 @@ def build_model(
     readout: str = "attention",
     drop_edge_p: float = 0.1,
     mode_init: "torch.Tensor | None" = None,
+    in_features: int = 1,
 ) -> nn.Module:
     if model_name == "graph_temporal":
-        return BrainGCNClassifier(hidden_dim, num_classes, dropout, readout, drop_edge_p)
+        return BrainGCNClassifier(hidden_dim, num_classes, dropout, readout, drop_edge_p, in_features=in_features)
     if model_name == "gcn":
         return GraphOnlyClassifier(hidden_dim, num_classes, dropout, readout, drop_edge_p)
     if model_name == "gru":
@@ -690,6 +696,13 @@ def build_model(
         return ConnectivityMLPClassifier(hidden_dim, num_classes, dropout)
     if model_name == "adv_fc_mlp":
         return AdversarialConnectivityMLP(hidden_dim, num_classes, num_sites, dropout)
+    if model_name == "dynamic_fc_attn":
+        from brain_gcn.models.dynamic_fc import DynamicFCAttention
+        return DynamicFCAttention(
+            num_rois=num_nodes,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
+        )
     if model_name == "brain_mode":
         return BrainModeNetwork(num_nodes, num_modes, hidden_dim, num_classes, dropout,
                                 mode_init=mode_init)

@@ -1,5 +1,5 @@
 {
-  "model_name": "graph_temporal",
+  "model_name": "gcn",
   "use_dynamic_adj_sequence": false,
   "use_population_adj": false
 }

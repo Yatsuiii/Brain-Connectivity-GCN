@@ -61,7 +61,7 @@ def sliding_fc_windows(
 
     Returns
     -------
-    bold_windows : (W, N)       mean BOLD per ROI per window
+    bold_windows : (W, N)       std of BOLD per ROI per window (local signal power)
     fc_windows   : (W, N, N)   Pearson FC per window
 
     where W = number of windows = (T - window_len) // step + 1
@@ -75,7 +75,7 @@ def sliding_fc_windows(
 
     for i, s in enumerate(starts):
         segment = bold[s : s + window_len]          # (window_len, N)
-        bold_windows[i] = segment.mean(axis=0)       # (N,)
+        bold_windows[i] = segment.std(axis=0)        # (N,) local signal power
         fc_windows[i] = compute_fc(segment)          # (N, N)
 
     return bold_windows, fc_windows

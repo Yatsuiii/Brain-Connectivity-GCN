@@ -49,6 +49,7 @@ class ClassificationTask(pl.LightningModule):
         num_modes: int = 16,
         orth_weight: float = 0.01,
         mode_init: "torch.Tensor | None" = None,
+        in_features: int = 1,
     ):
         """
         Parameters
@@ -61,6 +62,7 @@ class ClassificationTask(pl.LightningModule):
         cosine_eta_min   : minimum LR after annealing.
         num_sites        : number of acquisition sites (for adv_fc_mlp).
         adv_site_weight  : weight on the adversarial site loss term.
+        in_features      : node feature dimension (1 for BOLD std, N for FC rows).
         """
         super().__init__()
         self.save_hyperparameters(ignore=["class_weights", "mode_init"])
@@ -76,6 +78,7 @@ class ClassificationTask(pl.LightningModule):
             readout=readout,
             drop_edge_p=drop_edge_p,
             mode_init=mode_init,
+            in_features=in_features,
         )
         self.loss_fn = nn.CrossEntropyLoss(weight=class_weights)
         # Site cross-entropy — unweighted (sites roughly balanced)
@@ -220,7 +223,7 @@ class ClassificationTask(pl.LightningModule):
             "--model_name",
             choices=["graph_temporal", "gcn", "gru", "fc_mlp", "adv_fc_mlp",
                      "gat", "transformer", "cnn3d", "graphsage",
-                     "brain_mode", "adv_brain_mode"],
+                     "brain_mode", "adv_brain_mode", "dynamic_fc_attn"],
             default="graph_temporal",
         )
         parser.add_argument("--lr", type=float, default=1e-3)

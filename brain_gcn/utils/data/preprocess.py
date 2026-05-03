@@ -4,7 +4,7 @@ Preprocess ABIDE subjects into cached .npz files.
 Each .npz contains:
     bold        (T, N)      — z-scored BOLD time series
     mean_fc     (N, N)      — full-scan Pearson FC
-    bold_windows (W, N)      — mean BOLD per window (node features)
+    bold_windows (W, N)      — std of BOLD per window (local signal power; node features)
     fc_windows   (W, N, N)   — per-window Pearson FC (dynamic adjacency)
     label       scalar int  — 0 = TC, 1 = ASD
     subject_id  str

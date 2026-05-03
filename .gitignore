@@ -14,6 +14,9 @@ venv/
 lightning_logs/
 *.ckpt
 
+# Root-level process logs (large, not useful)
+/*.log
+
 # Editors
 .vscode/
 .idea/

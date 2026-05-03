@@ -22,7 +22,7 @@ from brain_gcn.main import build_parser, train_from_args, validate_args
 log = logging.getLogger(__name__)
 
 
-DEFAULT_MODELS = ("fc_mlp", "gru", "gcn", "graph_temporal")
+DEFAULT_MODELS = ("fc_mlp", "gcn", "graph_temporal")
 
 
 def metric_value(value) -> float | int | str:
@@ -48,7 +48,7 @@ def build_experiment_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--models",
         nargs="+",
-        choices=["fc_mlp", "gru", "gcn", "graph_temporal"],
+        choices=["fc_mlp", "gru", "gcn", "graph_temporal", "brain_mode"],
         default=list(DEFAULT_MODELS),
         help="Model modes to run in order.",
     )
@@ -71,16 +71,35 @@ def args_for_model(base_args: argparse.Namespace, model_name: str) -> argparse.N
     args.model_name = model_name
     args.prepare_data = False
 
-    if model_name == "fc_mlp":
+    if model_name in ("fc_mlp", "adv_fc_mlp", "brain_mode", "adv_brain_mode"):
+        # These use per-subject FC as flat features — no population/dynamic adj
         args.use_population_adj = False
         args.use_dynamic_adj_sequence = False
         args.use_dynamic_adj = False
-    elif model_name == "graph_temporal" and args.dynamic_graph_temporal:
+        args.use_fc_degree_features = False
+    elif model_name == "graph_temporal":
+        # Always use per-window FC as dynamic adjacency — population adj is uninformative
+        # Node features: per-ROI mean |FC| per window (connectivity strength, not BOLD std)
         args.use_population_adj = False
         args.use_dynamic_adj_sequence = True
         args.use_dynamic_adj = False
+        args.use_fc_degree_features = True
+    elif model_name == "gcn":
+        # Per-subject mean FC as static adjacency — population adj is same for all subjects
+        # Node features: per-ROI mean |FC| per window (more discriminative than BOLD std)
+        args.use_population_adj = False
+        args.use_dynamic_adj_sequence = False
+        args.use_dynamic_adj = False
+        args.use_fc_degree_features = True
+    elif model_name == "gru":
+        # GRU ignores adjacency; per-subject FC still better than population adj
+        args.use_population_adj = False
+        args.use_dynamic_adj_sequence = False
+        args.use_dynamic_adj = False
+        args.use_fc_degree_features = False
     else:
         args.use_dynamic_adj_sequence = False
+        args.use_fc_degree_features = False
 
     validate_args(args)
     return args

@@ -38,6 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--accelerator", type=str, default="auto")
     parser.add_argument("--devices", type=str, default="auto")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--ckpt_tag", type=str, default="",
+                        help="Optional suffix appended to checkpoint directory name (e.g. seed-specific).")
     parser.add_argument("--log_every_n_steps", type=int, default=1)
     parser.add_argument("--prepare_data", action="store_true")
     parser.add_argument("--test", action="store_true")
@@ -54,9 +56,9 @@ def build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 
 def validate_args(args: argparse.Namespace) -> None:
-    if args.model_name in ("fc_mlp", "adv_fc_mlp", "brain_mode", "adv_brain_mode") and args.use_population_adj:
+    if args.model_name in ("fc_mlp", "adv_fc_mlp", "brain_mode", "adv_brain_mode", "dynamic_fc_attn") and args.use_population_adj:
         raise ValueError(
-            "fc_mlp needs per-subject connectivity. Re-run with --no-use_population_adj."
+            f"{args.model_name} needs per-subject connectivity. Re-run with --no-use_population_adj."
         )
     if args.use_dynamic_adj_sequence and args.use_population_adj:
         raise ValueError(
@@ -87,6 +89,8 @@ def build_datamodule(args: argparse.Namespace) -> ABIDEDataModule:
         preserve_fc_sign=preserve_fc_sign,
         use_fc_variance=getattr(args, "use_fc_variance", False),
         use_fisher_z=getattr(args, "use_fisher_z", False),
+        use_fc_degree_features=getattr(args, "use_fc_degree_features", False),
+        use_fc_row_features=getattr(args, "use_fc_row_features", False),
         n_pca_components=getattr(args, "n_pca_components", 0),
         batch_size=args.batch_size,
         val_ratio=args.val_ratio,
@@ -102,7 +106,7 @@ def build_datamodule(args: argparse.Namespace) -> ABIDEDataModule:
 
 def _compute_class_weights(dm: ABIDEDataModule) -> torch.Tensor:
     """Balanced class weights from training labels: total / (n_classes * n_per_class)."""
-    labels = np.array(dm.train_dataset.labels)
+    labels = np.array([int(np.load(p, allow_pickle=True)["label"]) for p in dm._train_paths])
     n_td  = int((labels == 0).sum())
     n_asd = int((labels == 1).sum())
     total = n_td + n_asd
@@ -135,8 +139,8 @@ def build_task(args: argparse.Namespace, dm: ABIDEDataModule) -> ClassificationT
     # dm.setup() must have been called before this
     try:
         class_weights = _compute_class_weights(dm)
-    except Exception:
-        # Fallback: no weighting (e.g. during smoke tests before full setup)
+    except Exception as exc:
+        print(f"WARNING: Could not compute class weights ({exc}). Using uniform weights.")
         class_weights = None
 
     mode_init = None
@@ -165,6 +169,7 @@ def build_task(args: argparse.Namespace, dm: ABIDEDataModule) -> ClassificationT
         num_modes=getattr(args, "num_modes", 16),
         orth_weight=getattr(args, "orth_weight", 0.01),
         mode_init=mode_init,
+        in_features=dm.num_nodes if getattr(args, "use_fc_row_features", False) else 1,
     )
 
 
@@ -175,6 +180,9 @@ def build_trainer(args: argparse.Namespace) -> tuple[pl.Trainer, Path]:
     if args.model_name in ("brain_mode", "adv_brain_mode"):
         split_tag = getattr(args, "split_strategy", "site_holdout")[:4]  # e.g. "site" or "stra"
         ckpt_name += f"_k{getattr(args, 'num_modes', 16)}_{split_tag}"
+    ckpt_tag = getattr(args, "ckpt_tag", "")
+    if ckpt_tag:
+        ckpt_name += f"_{ckpt_tag}"
     ckpt_dir = Path("checkpoints") / ckpt_name
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     

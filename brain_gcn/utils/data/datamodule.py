@@ -70,6 +70,8 @@ class ABIDEDataModule(pl.LightningDataModule):
         preserve_fc_sign: bool = False,
         use_fc_variance: bool = False,
         use_fisher_z: bool = False,
+        use_fc_degree_features: bool = False,
+        use_fc_row_features: bool = False,
         n_pca_components: int = 0,
         batch_size: int = 32,
         val_ratio: float = 0.1,
@@ -122,6 +124,8 @@ class ABIDEDataModule(pl.LightningDataModule):
         self.preserve_fc_sign = preserve_fc_sign
         self.use_fc_variance = use_fc_variance
         self.use_fisher_z = use_fisher_z
+        self.use_fc_degree_features = use_fc_degree_features
+        self.use_fc_row_features = use_fc_row_features
         self.n_pca_components = n_pca_components
         self.batch_size = batch_size
         self.val_ratio = val_ratio
@@ -308,6 +312,8 @@ class ABIDEDataModule(pl.LightningDataModule):
             use_fisher_z=self.use_fisher_z,
             pca_mean=self._pca_mean,
             pca_components=self._pca_components,
+            use_fc_degree_features=self.use_fc_degree_features,
+            use_fc_row_features=self.use_fc_row_features,
         )
 
     @property
@@ -486,6 +492,10 @@ class ABIDEDataModule(pl.LightningDataModule):
                             help="Keep signed FC values in adjacency (required for fc_mlp).")
         parser.add_argument("--use_fc_variance", action="store_true",
                             help="Append std(fc_windows) as a second feature channel alongside mean FC.")
+        parser.add_argument("--use_fc_degree_features", action="store_true",
+                            help="Replace BOLD std node features with per-ROI mean |FC| per window.")
+        parser.add_argument("--use_fc_row_features", action="store_true",
+                            help="Use FC rows as node features (W,N,N). Requires graph_temporal + in_features=num_nodes.")
         parser.add_argument("--use_fisher_z", action="store_true",
                             help="Apply Fisher r-to-z transform to FC values before classification.")
         parser.add_argument("--n_pca_components", type=int, default=0,
