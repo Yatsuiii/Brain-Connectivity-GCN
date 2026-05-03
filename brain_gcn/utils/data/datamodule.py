@@ -358,20 +358,26 @@ class ABIDEDataModule(pl.LightningDataModule):
             raise ValueError("site_holdout split needs at least 3 sites.")
 
         sorted_sites = [site for site, _ in site_counts.most_common()]
-        if test_site is None:
-            test_site = sorted_sites[1]
+        # test_site may be a comma-separated list of sites (e.g. "UCLA_1,UCLA_2")
+        test_sites = [s.strip() for s in test_site.split(",")] if test_site else [sorted_sites[1]]
         if val_site is None:
-            val_site = next((site for site in reversed(sorted_sites) if site != test_site), None)
-        if val_site is None or val_site == test_site:
+            val_site = next((s for s in reversed(sorted_sites) if s not in test_sites), None)
+        if val_site is None or val_site in test_sites:
             raise ValueError("site_holdout split needs distinct val_site and test_site.")
-        if test_site not in site_counts:
-            raise ValueError(f"Unknown test_site '{test_site}'. Available: {sorted(site_counts)}")
+        for ts in test_sites:
+            if ts not in site_counts:
+                raise ValueError(f"Unknown test_site '{ts}'. Available: {sorted(site_counts)}")
         if val_site not in site_counts:
             raise ValueError(f"Unknown val_site '{val_site}'. Available: {sorted(site_counts)}")
 
-        train_mask = (sites != val_site) & (sites != test_site)
-        val_mask = sites == val_site
-        test_mask = sites == test_site
+        train_mask = np.ones(len(sites), dtype=bool)
+        for ts in test_sites:
+            train_mask &= (sites != ts)
+        train_mask &= (sites != val_site)
+        val_mask  = sites == val_site
+        test_mask = np.zeros(len(sites), dtype=bool)
+        for ts in test_sites:
+            test_mask |= (sites == ts)
 
         ABIDEDataModule._assert_both_labels(labels[train_mask], "train")
         ABIDEDataModule._assert_both_labels(labels[val_mask], "val")

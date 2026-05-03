@@ -5,7 +5,7 @@ __pycache__/
 .DS_Store
 
 # Downloaded + processed fMRI data (large files, not committed)
-data/
+/data/
 
 # Virtual environment
 venv/
