@@ -197,16 +197,14 @@ def _launch_gradio(models: list[tuple], device: str) -> None:
         print("Install gradio first:  pip install gradio", file=sys.stderr)
         sys.exit(1)
 
-    import tempfile
-
-    def _infer(file_obj) -> str:
-        if file_obj is None:
+    def _infer(file_path: str | None) -> str:
+        if file_path is None:
             return "Upload a .1D file to continue."
-        path = Path(file_obj.name)
+        path = Path(file_path)
         try:
             result = predict_file(path, models, device, verbose=False)
             lines = [
-                f"**{result['prediction']}**  ({result['confidence']*100:.1f}% confidence)",
+                f"{result['prediction']}  ({result['confidence']*100:.1f}% confidence)",
                 f"p(ASD) = {result['p_asd']:.3f}",
                 "",
                 "Per-model breakdown:",
@@ -221,7 +219,7 @@ def _launch_gradio(models: list[tuple], device: str) -> None:
 
     demo = gr.Interface(
         fn=_infer,
-        inputs=gr.File(label="Upload CC200 .1D file", file_types=[".1D"]),
+        inputs=gr.File(label="Upload CC200 .1D file", file_types=[".1D"], type="filepath"),
         outputs=gr.Textbox(label="Prediction", lines=10),
         title="Brain Connectivity ASD Predictor",
         description=(
@@ -229,9 +227,8 @@ def _launch_gradio(models: list[tuple], device: str) -> None:
             "Ensemble of 4 adversarial GCNs trained with leave-one-site-out CV.\n"
             "LOSO mean AUC = 0.7872 across 529 unseen subjects."
         ),
-        allow_flagging="never",
     )
-    demo.launch()
+    demo.launch(show_error=True)
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────
