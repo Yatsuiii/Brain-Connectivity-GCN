@@ -118,6 +118,71 @@ def preprocess(bold):
     bw   = _windows(bold)
     return torch.FloatTensor(bw).unsqueeze(0), torch.FloatTensor(adj).unsqueeze(0)
 
+# ── LLM (Qwen2.5-7B LoRA fine-tuned on AMD MI300X) ────────────────────────
+
+_LLM_MODEL = "Yatsuiii/asd-interpreter-lora"
+_SYSTEM_PROMPT = (
+    "You are a clinical AI assistant specializing in functional MRI brain "
+    "connectivity analysis for autism spectrum disorder (ASD) diagnosis support. "
+    "You interpret outputs from a validated graph neural network (GCN) trained on "
+    "the ABIDE I dataset and provide structured clinical summaries for neurologists "
+    "and psychiatrists. Your reports are informative and evidence-based but always "
+    "clarify that findings are AI-assisted and should be integrated with full "
+    "clinical assessment. You do not make a diagnosis."
+)
+_llm_cache = None
+
+def get_llm():
+    global _llm_cache
+    if _llm_cache is not None:
+        return _llm_cache
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    tok = AutoTokenizer.from_pretrained(_LLM_MODEL)
+    tok.pad_token = tok.eos_token
+    mdl = AutoModelForCausalLM.from_pretrained(
+        _LLM_MODEL, torch_dtype=torch.bfloat16, device_map="auto"
+    )
+    mdl.eval()
+    _llm_cache = (mdl, tok)
+    return _llm_cache
+
+def _llm_report(p_mean: float, per_model: list) -> str:
+    consensus = sum(1 for _, p in per_model if p > 0.5)
+    per_model_str = "\n".join(
+        f"  {s}-blind: {'ASD' if v > 0.5 else 'TC'} (p={v:.3f})" for s, v in per_model
+    )
+    conf_label = (
+        "HIGH" if p_mean >= 0.75 else
+        "MODERATE" if p_mean >= 0.6 else
+        "LOW / UNCERTAIN" if p_mean >= 0.4 else
+        "MODERATE (TC)" if p_mean >= 0.25 else "HIGH (TC)"
+    )
+    user_msg = (
+        f"Brain Connectivity GCN Analysis Report\n{'='*40}\n"
+        f"p(ASD)           : {p_mean:.3f}\n"
+        f"Confidence Level : {conf_label}\n"
+        f"Model Consensus  : {consensus}/{len(per_model)} site-blind models predict ASD\n\n"
+        f"Per-Model Breakdown (LOSO ensemble):\n{per_model_str}\n\n"
+        f"Please provide a structured clinical interpretation of these findings."
+    )
+    try:
+        mdl, tok = get_llm()
+        messages = [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user",   "content": user_msg},
+        ]
+        text = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = tok(text, return_tensors="pt").to(next(mdl.parameters()).device)
+        with torch.no_grad():
+            out = mdl.generate(
+                **inputs, max_new_tokens=512, temperature=0.3,
+                do_sample=True, pad_token_id=tok.eos_token_id,
+            )
+        generated = out[0][inputs["input_ids"].shape[1]:]
+        return tok.decode(generated, skip_special_tokens=True).strip()
+    except Exception as e:
+        return f"[LLM unavailable: {e}]"
+
 # ── model loading ──────────────────────────────────────────────────────────
 
 _model_cache: dict[str, list] = {}
@@ -513,6 +578,16 @@ LOSO AUC = 0.7260 · 1,102 held-out subjects · 20 acquisition sites
 
 <div style="border-top:1px solid #252a35;padding-top:10px;color:#5e6675;font-size:0.74rem;line-height:1.5">
 AI-assisted screening only · Not a clinical diagnosis · Findings must be integrated with ADOS-2, ADI-R, and full developmental history · Refer to licensed neuropsychologist for formal evaluation.</div></div>"""
+
+    # LLM clinical interpretation
+    llm_text = _llm_report(p_mean, per_model)
+    report += f"""
+<div style="background:#0f1a1a;border:1px solid #1a3a3a;border-radius:8px;padding:18px 24px;margin-top:12px">
+<div style="color:#2dc653;font-size:0.68rem;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;font-weight:600">
+  Qwen2.5-7B Clinical Interpretation · Fine-tuned on AMD MI300X
+</div>
+<div style="color:#cbd5e1;font-size:0.85rem;line-height:1.7;white-space:pre-wrap">{llm_text}</div>
+</div>"""
 
     return verdict, ensemble, report, sal_img
 
