@@ -23,3 +23,8 @@ references/
 # Editors
 .vscode/
 .idea/
+checkpoints/
+data/
+logs/
+__pycache__/
+*.pyc

@@ -154,6 +154,77 @@ def fetch_abide(
     return Bunch(rois_cc200=arrays, phenotypic=pheno_out)
 
 
+def fetch_local_atlas(
+    data_dir: str | Path,
+    n_subjects: int | None = None,
+) -> Bunch:
+    """
+    Load ABIDE atlas timeseries from a local directory of .1D files.
+
+    Detects atlas suffix automatically from filenames (e.g. _rois_ho, _rois_aal, _rois_cc200).
+    Pairs files with phenotypic CSV (downloaded from S3 if not cached).
+
+    Parameters
+    ----------
+    data_dir   : directory containing *_rois_<atlas>.1D files
+    n_subjects : max subjects to load (None = all)
+    """
+    data_dir = Path(data_dir)
+
+    # Find .1D files and detect atlas suffix
+    oned_files = sorted(data_dir.glob("*.1D"))
+    if not oned_files:
+        raise FileNotFoundError(f"No .1D files found in {data_dir}")
+
+    # Infer atlas tag from first filename e.g. "Caltech_0051457_rois_ho.1D" → "_rois_ho"
+    sample_stem = oned_files[0].stem  # e.g. "Caltech_0051457_rois_ho"
+    atlas_suffix = ""
+    for part in sample_stem.split("_"):
+        if part.startswith("rois"):
+            atlas_suffix = "_" + "_".join(sample_stem.split("_")[sample_stem.split("_").index(part):])
+            break
+    log.info("Detected atlas suffix: %r from %s", atlas_suffix, oned_files[0].name)
+
+    # Build subject_id → file map
+    sub_id_to_file: dict[str, Path] = {}
+    for f in oned_files:
+        stem = f.stem.replace(atlas_suffix, "")  # e.g. "Caltech_0051457"
+        parts = stem.rsplit("_", 1)
+        if len(parts) == 2:
+            sub_id_to_file[parts[1]] = f  # "0051457" → path
+
+    # Phenotypic CSV — reuse S3 download cache if available, else download
+    pheno_path = data_dir / "phenotypic.csv"
+    fallback_pheno = data_dir.parent / "phenotypic.csv"
+    if not pheno_path.exists() and fallback_pheno.exists():
+        pheno_path = fallback_pheno
+    if not pheno_path.exists():
+        log.info("Downloading phenotypic CSV from S3 ...")
+        s3 = _s3_client()
+        s3.download_file(S3_BUCKET, S3_PHENO_KEY, str(pheno_path))
+    pheno = pd.read_csv(pheno_path)
+    log.info("Phenotypic CSV: %d subjects. Local .1D files: %d.", len(pheno), len(oned_files))
+
+    # Pair arrays with phenotypic rows
+    arrays, rows = [], []
+    for _, row in pheno.iterrows():
+        sub_id = str(int(row[SUBJECT_ID_COL])).zfill(7)
+        if sub_id not in sub_id_to_file:
+            continue
+        try:
+            bold = np.loadtxt(sub_id_to_file[sub_id], dtype=np.float32)
+            arrays.append(bold)
+            rows.append(row)
+        except Exception as exc:
+            log.debug("Could not load %s: %s", sub_id_to_file[sub_id], exc)
+        if n_subjects and len(arrays) >= n_subjects:
+            break
+
+    pheno_out = pd.DataFrame(rows).reset_index(drop=True)
+    log.info("Built local dataset: %d subjects.", len(arrays))
+    return Bunch(rois_cc200=arrays, phenotypic=pheno_out)
+
+
 def get_label(phenotypic_row) -> int:
     """DX_GROUP: 1 = ASD, 2 = Typical Control  →  ASD=1, TC=0"""
     dx = int(phenotypic_row[LABEL_COL])

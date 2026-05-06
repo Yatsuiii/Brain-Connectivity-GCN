@@ -30,7 +30,7 @@ from sklearn.model_selection import StratifiedShuffleSplit
 from torch.utils.data import DataLoader
 
 from .dataset import ABIDEDataset
-from .download import fetch_abide, extract_subjects
+from .download import fetch_abide, fetch_local_atlas, extract_subjects
 from .functional_connectivity import compute_population_adj
 from .preprocess import preprocess_all
 
@@ -174,10 +174,13 @@ class ABIDEDataModule(pl.LightningDataModule):
                 self.n_subjects or "all",
             )
 
-        dataset = fetch_abide(
-            data_dir=self.raw_dir,
-            n_subjects=self.n_subjects,
-        )
+        # Use local .1D files if they exist in data_dir (atlas-specific training)
+        local_oned = list(self.data_dir.glob("*.1D"))
+        if local_oned:
+            log.info("Found %d local .1D files in %s — using atlas-native preprocessing.", len(local_oned), self.data_dir)
+            dataset = fetch_local_atlas(data_dir=self.data_dir, n_subjects=self.n_subjects)
+        else:
+            dataset = fetch_abide(data_dir=self.raw_dir, n_subjects=self.n_subjects)
         subjects = extract_subjects(dataset, min_timepoints=self.window_len + self.step)
         preprocess_all(
             subjects,
