@@ -519,7 +519,7 @@ def run_gcn(file_path):
 <div style="font-size:0.65rem;color:#8b95a7;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;font-weight:500">Leave-One-Site-Out Ensemble</div>
 <table style="width:100%;border-collapse:collapse">{rows}</table>
 <div style="margin-top:12px;padding-top:10px;border-top:1px solid #252a35;color:#5e6675;font-size:0.76rem">
-LOSO AUC = 0.7872 · 1,102 held-out subjects · 20 acquisition sites
+LOSO AUC = 0.7872 (top 4 sites) · 0.7298 mean across all 20 sites · 1,102 held-out subjects
 </div></div>"""
 
     # ── Report ──
@@ -626,8 +626,8 @@ HEADER = """
     <!-- Stat pills -->
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <div style="background:#161922;border:1px solid #252a35;border-radius:8px;padding:10px 18px;text-align:center">
-        <div style="font-size:1.35rem;font-weight:700;color:#ef4444;font-variant-numeric:tabular-nums">0.7872</div>
-        <div style="color:#5e6675;font-size:0.62rem;text-transform:uppercase;letter-spacing:1px;margin-top:2px">LOSO AUC</div>
+        <div style="font-size:1.35rem;font-weight:700;color:#ef4444;font-variant-numeric:tabular-nums">0.7298</div>
+        <div style="color:#5e6675;font-size:0.62rem;text-transform:uppercase;letter-spacing:1px;margin-top:2px">LOSO AUC (20 sites)</div>
       </div>
       <div style="background:#161922;border:1px solid #252a35;border-radius:8px;padding:10px 18px;text-align:center">
         <div style="font-size:1.35rem;font-weight:700;color:#f4f4f5;font-variant-numeric:tabular-nums">1,102</div>
@@ -645,7 +645,7 @@ HEADER = """
   </div>
 
   <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-    <span style="background:#2a1215;border:1px solid #ef444433;color:#ef4444;font-size:0.75rem;font-weight:600;padding:4px 10px;border-radius:20px">AUC 0.7872 cross-site</span>
+    <span style="background:#2a1215;border:1px solid #ef444433;color:#ef4444;font-size:0.75rem;font-weight:600;padding:4px 10px;border-radius:20px">AUC 0.7298 · 20-site LOSO mean</span>
     <span style="background:#1a1f2e;border:1px solid #457b9d44;color:#93c5fd;font-size:0.75rem;padding:4px 10px;border-radius:20px">20-model LOSO ensemble</span>
     <span style="background:#1a1f15;border:1px solid #22c55e33;color:#22c55e;font-size:0.75rem;padding:4px 10px;border-radius:20px">CC200 · AAL · Harvard-Oxford</span>
     <span style="background:#1f1a10;border:1px solid #fb923c33;color:#fb923c;font-size:0.75rem;padding:4px 10px;border-radius:20px">Qwen2.5-7B on AMD MI300X</span>
@@ -751,7 +751,8 @@ VALIDATION = f"""
         <tr><td style="padding:7px 0;color:#8b95a7;border-bottom:1px solid #1e2330">BrainNetCNN (Kawahara 2017)</td><td style="padding:7px 0;text-align:right;color:#cbd5e1;border-bottom:1px solid #1e2330;font-variant-numeric:tabular-nums">0.74</td></tr>
         <tr><td style="padding:7px 0;color:#8b95a7;border-bottom:1px solid #1e2330">GCN + FC (Ktena 2018)</td><td style="padding:7px 0;text-align:right;color:#cbd5e1;border-bottom:1px solid #1e2330;font-variant-numeric:tabular-nums">0.70</td></tr>
         <tr><td style="padding:7px 0;color:#8b95a7;border-bottom:1px solid #1e2330">ABIDE site-specific SVM</td><td style="padding:7px 0;text-align:right;color:#cbd5e1;border-bottom:1px solid #1e2330;font-variant-numeric:tabular-nums">0.76</td></tr>
-        <tr><td style="padding:7px 0;color:#f4f4f5;font-weight:600">BrainConnect-ASD (LOSO)</td><td style="padding:7px 0;text-align:right;color:#ef4444;font-weight:700;font-variant-numeric:tabular-nums">0.7872</td></tr>
+        <tr><td style="padding:7px 0;color:#f4f4f5;font-weight:600">BrainConnect-ASD (LOSO, 20 sites)</td><td style="padding:7px 0;text-align:right;color:#ef4444;font-weight:700;font-variant-numeric:tabular-nums">0.7298</td></tr>
+        <tr><td style="padding:7px 0;color:#f4f4f5;font-weight:600">BrainConnect-ASD (LOSO, top 4 sites)</td><td style="padding:7px 0;text-align:right;color:#ef4444;font-weight:700;font-variant-numeric:tabular-nums">0.7872</td></tr>
       </table>
       <div style="margin-top:10px;color:#5e6675;font-size:0.74rem;line-height:1.5">
         All prior results use <i>same-site</i> train/test splits. Ours is cross-site — a fundamentally harder evaluation.
@@ -834,7 +835,7 @@ ARCHITECTURE = """
       <tr><td style="padding:10px 16px;color:#8b95a7;width:150px;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Dataset</td><td style="padding:10px 16px;color:#cbd5e1">ABIDE I · 1,102 subjects · 20 acquisition sites</td></tr>
       <tr style="border-top:1px solid #252a35"><td style="padding:10px 16px;color:#8b95a7;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Parcellation</td><td style="padding:10px 16px;color:#cbd5e1">CC200 (200 ROIs) · AAL-116 (116 ROIs) · Harvard-Oxford (111 ROIs)</td></tr>
       <tr style="border-top:1px solid #252a35"><td style="padding:10px 16px;color:#8b95a7;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Model</td><td style="padding:10px 16px;color:#cbd5e1">AdversarialBrainModeNetwork · K=16 modes · hidden_dim=64</td></tr>
-      <tr style="border-top:1px solid #252a35"><td style="padding:10px 16px;color:#8b95a7;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Validation</td><td style="padding:10px 16px;color:#cbd5e1">LOSO AUC = <span style="color:#ef4444;font-weight:600">0.7872</span> · 1,102 held-out subjects · 20 acquisition sites</td></tr>
+      <tr style="border-top:1px solid #252a35"><td style="padding:10px 16px;color:#8b95a7;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Validation</td><td style="padding:10px 16px;color:#cbd5e1">LOSO AUC = <span style="color:#ef4444;font-weight:600">0.7298</span> (20-site mean) · <span style="color:#ef4444;font-weight:600">0.7872</span> (top 4 sites) · 1,102 held-out subjects</td></tr>
       <tr style="border-top:1px solid #252a35"><td style="padding:10px 16px;color:#8b95a7;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Interpretability</td><td style="padding:10px 16px;color:#cbd5e1">Real-time gradient saliency · 7-network aggregation · 3D brain surface</td></tr>
     </table>
   </div>
