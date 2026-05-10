@@ -846,9 +846,6 @@ ARCHITECTURE = """
 AMD = f"""
 <div>
 
-  <!-- Benchmark chart first — most impressive thing -->
-  <img src="data:image/png;base64,{AMD_BENCH_B64}" style="width:100%;border-radius:8px;margin-bottom:20px;border:1px solid #252a35"/>
-
   <!-- Two-column layout: stat grid left, pipeline right -->
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
 
@@ -857,8 +854,8 @@ AMD = f"""
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
         <div><div style="font-size:1.5rem;font-weight:700;color:#fb923c;font-variant-numeric:tabular-nums">192<span style="font-size:0.75rem;color:#5e6675;font-weight:400"> GB</span></div><div style="color:#8b95a7;font-size:0.68rem;margin-top:3px;text-transform:uppercase;letter-spacing:0.8px">HBM3 unified mem</div></div>
         <div><div style="font-size:1.5rem;font-weight:700;color:#fb923c">bf16</div><div style="color:#8b95a7;font-size:0.68rem;margin-top:3px;text-transform:uppercase;letter-spacing:0.8px">Full precision</div></div>
-        <div><div style="font-size:1.5rem;font-weight:700;color:#fb923c">30×</div><div style="color:#8b95a7;font-size:0.68rem;margin-top:3px;text-transform:uppercase;letter-spacing:0.8px">Faster than CPU</div></div>
-        <div><div style="font-size:1.5rem;font-weight:700;color:#fb923c">94ms</div><div style="color:#8b95a7;font-size:0.68rem;margin-top:3px;text-transform:uppercase;letter-spacing:0.8px">Per subject</div></div>
+        <div><div style="font-size:1.5rem;font-weight:700;color:#fb923c">60</div><div style="color:#8b95a7;font-size:0.68rem;margin-top:3px;text-transform:uppercase;letter-spacing:0.8px">Parallel LOSO runs</div></div>
+        <div><div style="font-size:1.5rem;font-weight:700;color:#fb923c">&lt;20ms</div><div style="color:#8b95a7;font-size:0.68rem;margin-top:3px;text-transform:uppercase;letter-spacing:0.8px">GCN inference</div></div>
       </div>
     </div>
 
