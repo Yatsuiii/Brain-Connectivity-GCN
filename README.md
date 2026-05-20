@@ -4,9 +4,9 @@ Adversarial Graph Convolutional Network for autism spectrum disorder (ASD) detec
 
 Built for the **AMD Developer Hackathon 2026** on AMD MI300X (192 GB HBM3).
 
-[![Live Demo](https://img.shields.io/badge/🧠%20Live%20Demo-HuggingFace%20Space-orange)](https://huggingface.co/spaces/lablab-ai-amd-developer-hackathon/BrainConnect-ASD)
+[![Live Demo](https://img.shields.io/badge/🧠%20Live%20Demo-HuggingFace%20Space-orange)](https://huggingface.co/spaces/Yatsuiii/BrainConnect-ASD)
 [![GCN Model](https://img.shields.io/badge/Model-brain--connect--gcn-blue)](https://huggingface.co/Yatsuiii/brain-connect-gcn)
-[![LLM Model](https://img.shields.io/badge/Model-asd--interpreter--merged-blue)](https://huggingface.co/Yatsuiii/asd-interpreter-merged)
+[![LLM Model](https://img.shields.io/badge/Model-asd--interpreter--merged-blue)](https://huggingface.co/lablab-ai-amd-developer-hackathon/asd-interpreter-merged)
 
 ---
 
@@ -73,7 +73,7 @@ Dataset: ABIDE I — 1,102 subjects, 20 institutions (Stanford, NYU, Yale, UCLA,
 | Model | Description | Link |
 |-------|-------------|------|
 | `Yatsuiii/brain-connect-gcn` | 105K adversarial GCN, LOSO checkpoints | [HF](https://huggingface.co/Yatsuiii/brain-connect-gcn) |
-| `Yatsuiii/asd-interpreter-merged` | Qwen2.5-7B fine-tuned on synthetic clinical reports | [HF](https://huggingface.co/Yatsuiii/asd-interpreter-merged) |
+| `lablab-ai-amd-developer-hackathon/asd-interpreter-merged` | Qwen2.5-7B fine-tuned on synthetic clinical reports | [HF](https://huggingface.co/lablab-ai-amd-developer-hackathon/asd-interpreter-merged) |
 
 ---
 

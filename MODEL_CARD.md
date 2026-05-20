@@ -21,7 +21,7 @@ datasets:
 
 20-model LOSO ensemble trained on ABIDE I (1,102 subjects, 20 acquisition sites, 3 atlases). Achieves **AUC 0.7298** on CC200 cross-site evaluation — every subject is test-only exactly once, trained on all other sites.
 
-Live demo: [BrainConnect-ASD Space](https://huggingface.co/spaces/lablab-ai-amd-developer-hackathon/BrainConnect-ASD)  
+Live demo: [BrainConnect-ASD Space](https://huggingface.co/spaces/Yatsuiii/BrainConnect-ASD)  
 Checkpoints: stored in the Space repo under `checkpoints/`
 
 ---
@@ -109,7 +109,7 @@ from huggingface_hub import hf_hub_download
 from brain_gcn.tasks import ClassificationTask
 
 ckpt = hf_hub_download(
-    repo_id="lablab-ai-amd-developer-hackathon/BrainConnect-ASD",
+    repo_id="Yatsuiii/BrainConnect-ASD",
     filename="checkpoints/cc200/adv_brain_mode_k32_site_cc200_loso_nyu/best.ckpt",
     repo_type="space"
 )
@@ -130,5 +130,5 @@ with torch.no_grad():
 ```
 BrainConnect-ASD — AMD Developer Hackathon 2026
 Raghav Aryen · lablab.ai · AMD MI300X
-https://huggingface.co/spaces/lablab-ai-amd-developer-hackathon/BrainConnect-ASD
+https://huggingface.co/spaces/Yatsuiii/BrainConnect-ASD
 ```
