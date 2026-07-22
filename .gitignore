@@ -9,6 +9,15 @@ __pycache__/
 
 # Virtual environment
 venv/
+.venv/
+
+# Test, coverage, and packaging artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
 
 # PyTorch Lightning logs & checkpoints
 lightning_logs/

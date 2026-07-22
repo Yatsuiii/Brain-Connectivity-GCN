@@ -1,5 +1,5 @@
 """
-BrainConnect-ASD — Scanner-site-invariant ASD detection from fMRI.
+BrainConnect-ASD — Cross-site ASD classification research from fMRI.
 """
 from __future__ import annotations
 
@@ -138,13 +138,10 @@ def preprocess(bold):
 
 _LLM_MODEL = "Yatsuiii/asd-interpreter-lora"
 _SYSTEM_PROMPT = (
-    "You are a clinical AI assistant specializing in functional MRI brain "
-    "connectivity analysis for autism spectrum disorder (ASD) diagnosis support. "
-    "You interpret outputs from a validated graph neural network (GCN) trained on "
-    "the ABIDE I dataset and provide structured clinical summaries for neurologists "
-    "and psychiatrists. Your reports are informative and evidence-based but always "
-    "clarify that findings are AI-assisted and should be integrated with full "
-    "clinical assessment. You do not make a diagnosis."
+    "You are a research assistant summarizing an experimental classifier output. "
+    "Do not diagnose, recommend care, assign clinical codes, or present generated "
+    "text as a measured subject-level brain finding. State that the summary is "
+    "synthetic, unvalidated, and for research demonstration only."
 )
 _llm_cache = None
 
@@ -179,7 +176,7 @@ def _llm_report(p_mean: float, per_model: list) -> str:
         f"Confidence Level : {conf_label}\n"
         f"Model Consensus  : {consensus}/{len(per_model)} site-blind models predict ASD\n\n"
         f"Per-Model Breakdown (LOSO ensemble):\n{per_model_str}\n\n"
-        f"Please provide a structured clinical interpretation of these findings."
+        f"Please provide a cautious research-use summary of these model outputs."
     )
     try:
         mdl, tok = get_llm()
@@ -484,18 +481,19 @@ def run_gcn(file_path):
         sal_img = None
 
     # ── Verdict ──
+    n_models = len(per_model)
     if p_mean > 0.6:
-        col, label = "#ef4444", "ASD Indicated"
-        detail = f"{consensus}/4 site-blind models agree"
+        col, label = "#ef4444", "ASD score above threshold"
+        detail = f"{consensus}/{n_models} site-blind models score above 0.5"
     elif p_mean < 0.4:
-        col, label = "#22c55e", "Typical Control"
-        detail = f"{4-consensus}/4 site-blind models agree"
+        col, label = "#22c55e", "ASD score below threshold"
+        detail = f"{n_models-consensus}/{n_models} site-blind models score at or below 0.5"
     else:
         col, label = "#f59e0b", "Inconclusive"
-        detail = "Clinical review required"
+        detail = "Research score near the decision threshold"
 
     verdict = f"""<div style="background:#161922;border:1px solid #252a35;border-left:3px solid {col};padding:22px 26px;border-radius:8px;margin-top:14px">
-<div style="font-size:0.65rem;color:#8b95a7;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;font-weight:500">Classification Result</div>
+<div style="font-size:0.65rem;color:#8b95a7;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;font-weight:500">Research Model Output</div>
 <div style="font-size:1.8rem;font-weight:600;color:{col};letter-spacing:-0.5px;line-height:1.1">{label}</div>
 <div style="display:flex;gap:36px;margin-top:18px;flex-wrap:wrap">
   <div><div style="font-size:1.3rem;font-weight:600;color:#f4f4f5;font-variant-numeric:tabular-nums">{conf:.1f}%</div><div style="color:#5e6675;font-size:0.7rem;margin-top:2px">Confidence</div></div>
@@ -519,7 +517,7 @@ def run_gcn(file_path):
 <div style="font-size:0.65rem;color:#8b95a7;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;font-weight:500">Leave-One-Site-Out Ensemble</div>
 <table style="width:100%;border-collapse:collapse">{rows}</table>
 <div style="margin-top:12px;padding-top:10px;border-top:1px solid #252a35;color:#5e6675;font-size:0.76rem">
-LOSO AUC = 0.7872 (top 4 sites) · 0.7298 mean across all 20 sites · 1,102 held-out subjects
+Headline four-site LOSO AUC = 0.7872 (N=529) · broader 20-site LOSO AUC = 0.7298 (N=1,102)
 </div></div>"""
 
     # ── Report ──
@@ -528,36 +526,36 @@ LOSO AUC = 0.7872 (top 4 sites) · 0.7298 mean across all 20 sites · 1,102 held
                     "Atypical salience network lateralization",
                     "Decreased long-range frontotemporal connectivity"]
         imp  = f"ASD-consistent connectivity profile ({conf:.1f}% confidence)."
-        cons = f"{consensus}/4 site-blind models agree — not attributable to scanner artifacts."
+        cons = f"{consensus}/{n_models} model scores are above 0.5; residual site confounding may remain."
     elif p_mean < 0.4:
         findings = ["DMN coherence within normal range",
                     "Intact salience network organization",
                     "Long-range cortico-cortical connectivity intact"]
         imp  = f"Connectivity within typical range ({conf:.1f}% confidence)."
-        cons = f"{4-consensus}/4 site-blind models confirm typical profile."
+        cons = f"{n_models-consensus}/{n_models} model scores are at or below 0.5; residual site confounding may remain."
     else:
         findings = ["Mixed connectivity near ASD–TC boundary",
                     "Significant model disagreement across sites",
-                    "Borderline p(ASD) requires clinical judgment"]
+                    "Borderline p(ASD) requires cautious research interpretation"]
         imp  = "Indeterminate. Full evaluation recommended."
-        cons = f"Only {consensus}/4 models agree — specialist input required."
+        cons = f"{consensus}/{n_models} model scores are above 0.5; the ensemble is near its threshold."
 
     # ICD-10 and citation grounding
     if p_mean > 0.6:
-        icd = "F84.0 (Childhood Autism) / F84.1 (Atypical Autism)"
+        icd = "Not provided — research use only"
         refs = [
             ("Rudie et al. 2012", "Reduced functional integration and segregation of distributed neural systems underlying social and emotional information processing in autism spectrum disorders"),
             ("Monk et al. 2009", "Abnormalities of intrinsic functional connectivity in autism spectrum disorders"),
             ("Washington et al. 2014", "Dysmaturation of the default mode network in autism"),
         ]
     elif p_mean < 0.4:
-        icd = "Z03.89 (No diagnosis — screening negative)"
+        icd = "Not provided — research use only"
         refs = [
             ("Buckner et al. 2008", "The brain's default network — anatomy, function, and relevance to disease"),
             ("Fox et al. 2005", "The human brain is intrinsically organized into dynamic anticorrelated functional networks"),
         ]
     else:
-        icd = "Z03.89 (Inconclusive — further evaluation required)"
+        icd = "Not provided — research use only"
         refs = [
             ("Ecker et al. 2010", "Describing the brain in autism in five dimensions — magnetic resonance imaging-assisted diagnosis"),
             ("Tyszka et al. 2014", "Largely typical patterns of resting-state functional connectivity in high-functioning adults with autism"),
@@ -571,10 +569,10 @@ LOSO AUC = 0.7872 (top 4 sites) · 0.7298 mean across all 20 sites · 1,102 held
     )
 
     report = f"""<div style="background:#161922;border:1px solid #252a35;border-radius:8px;padding:18px 24px;margin-top:10px">
-<div style="font-size:0.65rem;color:#8b95a7;letter-spacing:2px;text-transform:uppercase;margin-bottom:16px;font-weight:500">Clinical Referral Summary · Generated by Qwen2.5-7B LoRA · AMD Instinct MI300X</div>
+<div style="font-size:0.65rem;color:#8b95a7;letter-spacing:2px;text-transform:uppercase;margin-bottom:16px;font-weight:500">Synthetic Research Summary · Generated by Qwen2.5-7B LoRA · AMD Instinct MI300X</div>
 
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-  <div><div style="color:#8b95a7;font-size:0.68rem;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">ICD-10 Classification</div>
+  <div><div style="color:#8b95a7;font-size:0.68rem;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Clinical classification</div>
   <div style="color:#cbd5e1;font-size:0.84rem;line-height:1.4">{icd}</div></div>
   <div><div style="color:#8b95a7;font-size:0.68rem;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Ensemble Confidence</div>
   <div style="color:#cbd5e1;font-size:0.84rem">{conf:.1f}% · p(ASD) = {p_mean:.3f} · {len(models)}-model LOSO</div></div>
@@ -593,14 +591,14 @@ LOSO AUC = 0.7872 (top 4 sites) · 0.7298 mean across all 20 sites · 1,102 held
 <div style="margin-bottom:14px">{refs_html}</div>
 
 <div style="border-top:1px solid #252a35;padding-top:10px;color:#5e6675;font-size:0.74rem;line-height:1.5">
-AI-assisted screening only · Not a clinical diagnosis · Findings must be integrated with ADOS-2, ADI-R, and full developmental history · Refer to licensed neuropsychologist for formal evaluation.</div></div>"""
+Research demonstration only · Not a clinical diagnosis or screening result · Narrative findings are synthetic templates and are not subject-level measurements.</div></div>"""
 
-    # LLM clinical interpretation
+    # LLM-generated research summary
     llm_text = _llm_report(p_mean, per_model)
     report += f"""
 <div style="background:#0f1a1a;border:1px solid #1a3a3a;border-radius:8px;padding:18px 24px;margin-top:12px">
 <div style="color:#2dc653;font-size:0.68rem;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;font-weight:600">
-  Qwen2.5-7B Clinical Interpretation · Fine-tuned on AMD MI300X
+  Qwen2.5-7B Synthetic Research Summary · Fine-tuned on AMD MI300X
 </div>
 <div style="color:#cbd5e1;font-size:0.85rem;line-height:1.7;white-space:pre-wrap">{llm_text}</div>
 </div>"""
@@ -716,8 +714,8 @@ VALIDATION = f"""
     </table>
   </div>
   <div style="margin-top:12px;color:#8b95a7;font-size:0.8rem;line-height:1.6">
-    Inconclusive predictions (0.4 &lt; p &lt; 0.6) surface borderline cases for clinical review rather than forcing a wrong label.
-    <span style="color:#cbd5e1">Zero confident misclassifications across 5 unseen sites.</span>
+    Inconclusive predictions (0.4 &lt; p &lt; 0.6) expose borderline research scores rather than forcing a binary label.
+    <span style="color:#cbd5e1">The displayed cases are illustrative and are not a substitute for the full benchmark.</span>
   </div>
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:22px">
@@ -819,13 +817,13 @@ ARCHITECTURE = """
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <span style="background:#8b5cf622;color:#8b5cf6;font-size:0.68rem;font-weight:700;padding:2px 7px;border-radius:4px;text-transform:uppercase;letter-spacing:0.8px">GRL</span>
       </div>
-      <div style="color:#cbd5e1;font-size:0.84rem;line-height:1.55">Gradient Reversal Layer (Ganin 2016) forces the encoder to learn representations that are <em>maximally confusing</em> to a site classifier — scanner artifacts can't leak into the ASD prediction.</div>
+      <div style="color:#cbd5e1;font-size:0.84rem;line-height:1.55">Gradient Reversal Layer (Ganin 2016) encourages representations that are less informative to a site classifier. This can reduce, but does not guarantee removal of, scanner artifacts.</div>
     </div>
     <div style="background:#161922;border:1px solid #252a35;border-radius:8px;padding:16px 18px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <span style="background:#ef444422;color:#ef4444;font-size:0.68rem;font-weight:700;padding:2px 7px;border-radius:4px;text-transform:uppercase;letter-spacing:0.8px">LOSO</span>
       </div>
-      <div style="color:#cbd5e1;font-size:0.84rem;line-height:1.55">4 models, each trained blind to one scanner site. At inference all 4 vote — if 3/4 agree across different hardware, it's a biology signal, not an artifact.</div>
+      <div style="color:#cbd5e1;font-size:0.84rem;line-height:1.55">Each LOSO model is trained without one acquisition site. Agreement can reduce reliance on a single site, but does not prove that a score is biological or free of confounding.</div>
     </div>
   </div>
 
@@ -835,7 +833,7 @@ ARCHITECTURE = """
       <tr><td style="padding:10px 16px;color:#8b95a7;width:150px;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Dataset</td><td style="padding:10px 16px;color:#cbd5e1">ABIDE I · 1,102 subjects · 20 acquisition sites</td></tr>
       <tr style="border-top:1px solid #252a35"><td style="padding:10px 16px;color:#8b95a7;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Parcellation</td><td style="padding:10px 16px;color:#cbd5e1">CC200 (200 ROIs) · AAL-116 (116 ROIs) · Harvard-Oxford (111 ROIs)</td></tr>
       <tr style="border-top:1px solid #252a35"><td style="padding:10px 16px;color:#8b95a7;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Model</td><td style="padding:10px 16px;color:#cbd5e1">AdversarialBrainModeNetwork · K=16 modes · hidden_dim=64</td></tr>
-      <tr style="border-top:1px solid #252a35"><td style="padding:10px 16px;color:#8b95a7;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Validation</td><td style="padding:10px 16px;color:#cbd5e1">LOSO AUC = <span style="color:#ef4444;font-weight:600">0.7298</span> (20-site mean) · <span style="color:#ef4444;font-weight:600">0.7872</span> (top 4 sites) · 1,102 held-out subjects</td></tr>
+      <tr style="border-top:1px solid #252a35"><td style="padding:10px 16px;color:#8b95a7;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Validation</td><td style="padding:10px 16px;color:#cbd5e1"><span style="color:#ef4444;font-weight:600">0.7872</span> AUC in the four-site evaluation (N=529) · <span style="color:#ef4444;font-weight:600">0.7298</span> AUC in the broader 20-site experiment (N=1,102)</td></tr>
       <tr style="border-top:1px solid #252a35"><td style="padding:10px 16px;color:#8b95a7;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Interpretability</td><td style="padding:10px 16px;color:#cbd5e1">Real-time gradient saliency · 7-network aggregation · 3D brain surface</td></tr>
     </table>
   </div>
@@ -876,7 +874,7 @@ AMD = f"""
     <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
       <tr><td style="padding:10px 16px;color:#8b95a7;width:150px;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Base model</td><td style="padding:10px 16px;color:#cbd5e1">Qwen/Qwen2.5-7B-Instruct <span style="color:#5e6675">· AMD partner model · ROCm native</span></td></tr>
       <tr style="border-top:1px solid #252a35"><td style="padding:10px 16px;color:#8b95a7;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Method</td><td style="padding:10px 16px;color:#cbd5e1">LoRA r=16 α=32 · q, k, v, o, gate, up, down projections · bf16 — no quantization needed</td></tr>
-      <tr style="border-top:1px solid #252a35"><td style="padding:10px 16px;color:#8b95a7;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Training task</td><td style="padding:10px 16px;color:#cbd5e1">GCN ensemble output → structured clinical referral letter with ICD-10 codes</td></tr>
+      <tr style="border-top:1px solid #252a35"><td style="padding:10px 16px;color:#8b95a7;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Training task</td><td style="padding:10px 16px;color:#cbd5e1">GCN ensemble output → synthetic narrative template for research demonstration</td></tr>
       <tr style="border-top:1px solid #252a35"><td style="padding:10px 16px;color:#8b95a7;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.5px">Why MI300X?</td><td style="padding:10px 16px;color:#cbd5e1">192 GB unified HBM3 fits the full 7B model in bf16 without sharding — impossible on consumer GPUs. ROCm enables native PyTorch training with zero code changes.</td></tr>
     </table>
   </div>

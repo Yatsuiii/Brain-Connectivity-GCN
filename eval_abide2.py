@@ -3,7 +3,7 @@
 Zero-shot evaluation of the ABIDE-I trained ensemble on ABIDE II.
 
 Downloads ABIDE II CC200 ROI time series from the Preprocessed Connectomes
-Project S3 bucket (no NIfTI, no FSL/ANTs required), runs the 4-model ensemble,
+Project S3 bucket (no NIfTI, no FSL/ANTs required), runs the CC200 ensemble,
 and reports AUC + accuracy stratified by site.
 
 Usage:

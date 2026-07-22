@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Generate fine-tuning dataset for a medical LLM that interprets
-brain connectivity GCN predictions into clinical reports.
+Generate synthetic fine-tuning examples for a research-use LLM that summarizes
+brain-connectivity GCN outputs.
 
 Output: finetune_data/asd_interpreter.jsonl
 Format: HuggingFace chat format (system/user/assistant messages)
 
-Grounded in real ASD neuroscience literature:
+The text below consists of author-written templates inspired by broad themes in
+ASD neuroscience. It is not patient data, clinician-authored reporting, or
+subject-level attribution evidence.
 - Reduced DMN coherence (mPFC ↔ PCC)
 - Atypical salience network (insula, ACC)
 - Reduced social brain connectivity (TPJ, STS, FFA)
@@ -26,13 +28,11 @@ SITES = ["NYU", "USM", "UCLA", "UM", "PITT", "CALTECH", "STANFORD",
          "TRINITY", "YALE", "CMU", "LEUVEN", "KKI", "MAXMUN", "OHSU"]
 
 SYSTEM_PROMPT = (
-    "You are a clinical AI assistant specializing in functional MRI brain "
-    "connectivity analysis for autism spectrum disorder (ASD) diagnosis support. "
-    "You interpret outputs from a validated graph neural network (GCN) trained on "
-    "the ABIDE I dataset and provide structured clinical summaries for neurologists "
-    "and psychiatrists. Your reports are informative and evidence-based but always "
-    "clarify that findings are AI-assisted and should be integrated with full "
-    "clinical assessment. You do not make a diagnosis."
+    "You are a research assistant summarizing outputs from an experimental "
+    "functional-connectivity classifier trained on ABIDE I. Clearly distinguish "
+    "model outputs from measured subject-level findings. Do not diagnose, recommend "
+    "care, assign clinical codes, or claim that generated statements are validated. "
+    "State that the output is synthetic and for research demonstration only."
 )
 
 # ── ASD network findings (literature-grounded) ─────────────────────────────
@@ -119,14 +119,10 @@ UNCERTAINTY_NOTES = [
 ]
 
 CAVEATS = [
-    "These findings are AI-generated and must be integrated with clinical history, "
-    "behavioral assessment, and standardized diagnostic instruments (e.g., ADOS-2, ADI-R).",
-    "This report supports clinical decision-making and does not constitute a diagnosis. "
-    "Full neuropsychological evaluation is recommended.",
-    "AI-assisted analysis based on resting-state fMRI only. Structural MRI, clinical "
-    "interview, and developmental history are essential for diagnostic conclusions.",
-    "Scanner-site-invariant model (validated across 4 independent acquisition sites). "
-    "Findings should be corroborated with clinical presentation and collateral history.",
+    "This is a synthetic research template, not a subject-level measurement or diagnosis.",
+    "The classifier is retrospective and has not been prospectively validated for clinical use.",
+    "Resting-state fMRI model output alone cannot establish an ASD diagnosis or brain mechanism.",
+    "LOSO evaluation reduces reliance on one acquisition site but does not prove site invariance.",
 ]
 
 
@@ -175,7 +171,7 @@ Model Consensus  : {agreement}/4 site models predict ASD
 Per-Model Breakdown (LOSO ensemble):
 {format_per_model(per_model)}
 
-Please provide a structured clinical interpretation of these findings."""
+Please provide a cautious research-use summary of these model outputs."""
 
 
 def build_asd_report(p_asd: float, per_model: list, site: str) -> str:
@@ -197,18 +193,18 @@ def build_asd_report(p_asd: float, per_model: list, site: str) -> str:
         else f"Partial model agreement ({agreement}/4 models)"
     )
 
-    return f"""## Clinical Connectivity Summary
+    return f"""## Synthetic Research Summary
 
 **Overall Impression**: Connectivity profile consistent with Autism Spectrum Disorder (p_ASD = {p_asd:.3f}). {severity.capitalize()} atypicality across key functional networks. {consensus_note}, supporting cross-scanner robustness of this finding.
 
 **Network-Level Findings**:
 {chr(10).join(f'{i+1}. {f}' for i, f in enumerate(findings))}
 
-**Cross-Site Consistency**: The LOSO ensemble (models trained on independent scanner sites) shows {agreement}/4 site models flagging ASD-consistent patterns, indicating the finding is not attributable to site-specific acquisition artifacts.
+**Cross-Site Consistency**: The LOSO ensemble shows {agreement}/4 model scores above 0.5. Residual site, motion, demographic, and preprocessing confounding may remain.
 
-**Clinical Significance**: Resting-state fMRI connectivity patterns are {severity}ly atypical relative to a normative distribution derived from {random.randint(800, 1000)} ABIDE I participants. The observed profile aligns with established ASD connectivity signatures in the peer-reviewed literature.
+**Research Context**: This synthetic narrative is based on broad literature themes and the model score; it is not derived from validated subject-level network attribution.
 
-**Recommendation**: {random.choice(CAVEATS)}"""
+**Limitation**: {random.choice(CAVEATS)}"""
 
 
 def build_tc_report(p_asd: float, per_model: list, site: str) -> str:
@@ -219,18 +215,18 @@ def build_tc_report(p_asd: float, per_model: list, site: str) -> str:
     for net_name, options in networks:
         findings.append(f"**{net_name}**: {random.choice(options)}")
 
-    return f"""## Clinical Connectivity Summary
+    return f"""## Synthetic Research Summary
 
 **Overall Impression**: Connectivity profile within typical range (p_ASD = {p_asd:.3f}). No significant functional connectivity atypicalities detected across primary networks associated with ASD. {agreement}/4 site-specific models concur with a typical neurodevelopmental classification.
 
 **Network-Level Findings**:
 {chr(10).join(f'{i+1}. {f}' for i, f in enumerate(findings))}
 
-**Cross-Site Consistency**: {agreement}/4 LOSO site models classify as Typical Control, indicating this finding generalizes across scanner environments and is not acquisition-site-specific.
+**Cross-Site Consistency**: {agreement}/4 LOSO model scores are at or below 0.5. This does not establish the absence of ASD or acquisition-site effects.
 
-**Clinical Significance**: Resting-state FC patterns are within the normative range established from the ABIDE I cohort. No connectivity markers characteristic of ASD were detected at this threshold.
+**Research Context**: This is a classifier output relative to its training distribution, not a clinical normative assessment or validated biomarker result.
 
-**Recommendation**: {random.choice(CAVEATS)}"""
+**Limitation**: {random.choice(CAVEATS)}"""
 
 
 def build_uncertain_report(p_asd: float, per_model: list, site: str) -> str:
@@ -239,19 +235,19 @@ def build_uncertain_report(p_asd: float, per_model: list, site: str) -> str:
     asd_net = random.choice(ASD_HIGH_CONF)
     tc_net  = random.choice(TC_HIGH_CONF)
 
-    return f"""## Clinical Connectivity Summary
+    return f"""## Synthetic Research Summary
 
-**Overall Impression**: Indeterminate connectivity profile (p_ASD = {p_asd:.3f}). The model ensemble shows mixed results ({agreement}/4 site models predict ASD), and connectivity patterns contain both typical and atypical features. Heightened clinical scrutiny is warranted.
+**Overall Impression**: Indeterminate model output (p_ASD = {p_asd:.3f}). The ensemble shows mixed scores ({agreement}/4 above 0.5), so the research system should abstain from a binary summary.
 
 **Mixed Network Findings**:
 1. **{asd_net[0]} (Atypical)**: {random.choice(asd_net[1])}
 2. **{tc_net[0]} (Within Range)**: {random.choice(tc_net[1])}
 
-**Model Disagreement**: Cross-site model disagreement ({agreement}/4 consensus) may reflect a presentation near the ASD–TC boundary, subthreshold features, or clinical heterogeneity not well-captured by population-level training data.
+**Model Disagreement**: Cross-site model disagreement ({agreement}/4 above 0.5) may reflect a score near the model boundary, dataset shift, or residual confounding.
 
 **Note**: {random.choice(UNCERTAINTY_NOTES)}
 
-**Recommendation**: {random.choice(CAVEATS)}"""
+**Limitation**: {random.choice(CAVEATS)}"""
 
 
 def generate_example(p_asd: float | None = None) -> dict:

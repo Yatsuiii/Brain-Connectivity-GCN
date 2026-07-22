@@ -9,7 +9,7 @@ python_version: "3.13"
 app_file: app.py
 pinned: false
 license: apache-2.0
-short_description: ASD detection from brain connectivity
+short_description: Cross-site ASD brain-connectivity research demo
 tags:
   - amd
   - amd-hackathon-2026
@@ -20,21 +20,21 @@ tags:
 
 # BrainConnect-ASD
 
-Site-invariant Autism Spectrum Disorder classification from resting-state fMRI, built for the AMD Developer Hackathon 2026.
+Cross-site Autism Spectrum Disorder classification research from resting-state fMRI, built for the AMD Developer Hackathon 2026. Headline four-site LOSO AUC: **0.7872** across 529 held-out subjects. Broader 20-site LOSO AUC: **0.7298** across 1,102 subjects. Research use only; not a diagnostic or screening tool.
 
 ## Models
 
 | Model | Description |
 |---|---|
-| [Yatsuiii/brain-connect-gcn](https://huggingface.co/Yatsuiii/brain-connect-gcn) | Adversarial Brain Mode Network — 20-model LOSO GCN ensemble, AUC 0.7298 cross-site |
-| [Yatsuiii/asd-interpreter-merged](https://huggingface.co/Yatsuiii/asd-interpreter-merged) | Qwen2.5-7B fine-tuned clinical interpreter — generates natural language reports from saliency scores |
+| [Yatsuiii/brain-connect-gcn](https://huggingface.co/Yatsuiii/brain-connect-gcn) | Adversarial Brain Mode Network — 20-model LOSO GCN ensemble |
+| [Yatsuiii/asd-interpreter-merged](https://huggingface.co/Yatsuiii/asd-interpreter-merged) | Qwen2.5-7B synthetic research-summary model; not clinically validated |
 
 ## Pipeline
 
 ```
 fMRI (.1D) → preprocessing → FC matrix → GCN ensemble (20 models) → p(ASD)
                                                     ↓
-                                         gradient saliency → Qwen2.5-7B → clinical report
+                                         gradient saliency → Qwen2.5-7B → synthetic research summary
 ```
 
 - **60 total models** trained across 3 atlases (CC200, AAL, Harvard-Oxford) × 20 LOSO folds

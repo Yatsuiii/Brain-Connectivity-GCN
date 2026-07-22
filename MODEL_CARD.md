@@ -7,128 +7,109 @@ tags:
   - fMRI
   - graph-neural-network
   - brain-connectivity
-  - amd-mi300x
-  - rocm
   - pytorch
 pipeline_tag: graph-ml
 datasets:
   - ABIDE-I
 ---
 
-# brain-connect-gcn
+# BrainConnect-ASD model card
 
-**Adversarial Brain Mode Network — site-invariant ASD classification from resting-state fMRI.**
+## Model summary
 
-20-model LOSO ensemble trained on ABIDE I (1,102 subjects, 20 acquisition sites, 3 atlases). Achieves **AUC 0.7298** on CC200 cross-site evaluation — every subject is test-only exactly once, trained on all other sites.
+BrainConnect-ASD is an adversarial graph neural network for retrospective
+research on ASD versus typical-control classification from resting-state fMRI.
+It uses a gradient-reversal head during training to discourage acquisition-site
+information in the learned representation. Its headline four-site LOSO
+evaluation achieves **0.7872 ROC AUC across 529 held-out ABIDE I subjects**.
 
-Live demo: [BrainConnect-ASD Space](https://huggingface.co/spaces/Yatsuiii/BrainConnect-ASD)  
-Checkpoints: stored in the Space repo under `checkpoints/`
+This model is a research artifact. It is not a medical device and must not be
+used for diagnosis, screening, prognosis, patient selection, or treatment.
 
----
+## Intended use
+
+Appropriate uses include:
+
+- research on cross-site robustness in functional-connectivity models;
+- reproduction or critique of the reported LOSO experiment;
+- methodological comparisons under equivalent subject-level splits; and
+- educational demonstrations using non-identifiable research data.
+
+Out-of-scope uses include clinical decision-making, individual risk assessment,
+unsupervised deployment, and claims about specific brain mechanisms based only
+on model predictions or saliency.
 
 ## Architecture
 
-```
-Input: BOLD time-series (196 TRs × N ROIs)
-  ↓
-Preprocessing: z-score → FC matrix (Pearson r → Fisher z) → adjacency thresholding
-  ↓
-Brain Mode Decomposition: K=32 learnable spectral modes (graph wavelet basis)
-  ↓
-GCN Encoder: 2-layer graph convolution, hidden_dim=128, dropout=0.3
-  ↓
-Gradient Reversal Layer (Ganin 2016): removes site-specific scanner artifacts
-  ↓
-ASD Classifier head → p(ASD) ∈ [0, 1]
-  ↓
-20-model ensemble mean → final prediction
-```
-
-| Component | Detail |
+| Component | Configuration |
 |---|---|
-| **Total parameters** | ~105K |
-| **Learnable modes** | K = 32 |
-| **Hidden dim** | 128 |
-| **Dropout** | 0.3 |
-| **Atlases** | CC200 (200 ROIs) · AAL (116 ROIs) · Harvard-Oxford (111 ROIs) |
-| **Loss** | Cross-entropy + GRL adversarial site loss |
-| **Training** | 150 epochs · batch 32 · lr 5e-4 · AdamW |
+| Input | preprocessed BOLD time series and FC adjacency |
+| Parcellation | CC200 for the primary reported result |
+| Graph modes | 32 learnable modes |
+| Hidden dimension | 128 |
+| Dropout | 0.3 |
+| Parameters | approximately 105,000 |
+| Objective | ASD classification plus site-adversarial loss |
+| Optimizer | AdamW |
 
----
+## Training and evaluation data
 
-## Why Adversarial Training?
+The model was developed with ABIDE I, a retrospective multi-institution
+neuroimaging research dataset. The repository does not redistribute ABIDE data.
+The reported protocol uses leave-one-site-out evaluation: a model is trained on
+the other sites and evaluated on the held-out site.
 
-ABIDE I was collected across 20 sites with different scanners, protocols, and demographics. A naive classifier learns site identity as a shortcut — it generalizes poorly to unseen institutions.
+ABIDE II is not included in the reported model-card result. The repository
+contains an evaluation script, but external results should not be claimed until
+the full run, exclusions, and output artifacts are published.
 
-The **Gradient Reversal Layer** (GRL) flips the gradient sign for the site prediction head during backprop, forcing the encoder to produce representations that are *maximally confusing* to a site classifier. Scanner artifacts and acquisition-specific signals cannot leak into the ASD prediction.
+## Reported performance
 
-This is validated empirically: the LOSO protocol uses a model trained on 19 sites to predict the 20th — it has never seen that institution's data, scanner, or demographic distribution.
+| Evaluation | N | ROC AUC |
+|---|---:|---:|
+| **Four-site LOSO evaluation: NYU, USM, UCLA, UM** | **529** | **0.7872** |
+| Broader ABIDE I 20-site LOSO experiment | 1,102 | 0.7298 |
 
----
+The 0.7872 value describes the four-site evaluation. The 0.7298 value describes
+the broader 20-site experiment used by the current demo. They are different
+evaluation scopes and are not directly interchangeable. ROC AUC does not select
+an operating threshold or establish clinical utility.
 
-## Results
+## Limitations and risks
 
-| Metric | Value |
-|---|---|
-| **CC200 LOSO AUC** | **0.7298** |
-| HO LOSO AUC | 0.7212 |
-| AAL LOSO AUC | 0.6959 |
-| Subjects | 1,102 (ABIDE I) |
-| Sites | 20 |
-| Evaluation | Cross-site LOSO — every subject is test-only |
+- ASD is clinically and biologically heterogeneous.
+- Resting-state fMRI alone is insufficient for an ASD diagnosis.
+- ABIDE site composition, demographics, head motion, and preprocessing may
+  introduce residual confounding.
+- Gradient reversal encourages but does not guarantee site invariance.
+- Aggregate AUC can conceal poor performance at individual sites or in
+  demographic subgroups.
+- The current evidence is retrospective; prospective clinical validation has
+  not been performed.
+- Generated narrative explanations are based on synthetic templates and are
+  not validated clinical reports.
 
-### vs. Published ABIDE Baselines
+Users should report per-site sample sizes and metrics, uncertainty intervals,
+calibration, exclusions, preprocessing, and failed runs when publishing derived
+work.
 
-| Model | AUC | Split |
-|---|---|---|
-| SVM + FC (Plitt 2015) | 0.71 | Same-site |
-| BrainNetCNN (Kawahara 2017) | 0.74 | Same-site |
-| GCN + FC (Ktena 2018) | 0.70 | Same-site |
-| ABIDE site-specific SVM | 0.76 | Same-site |
-| **BrainConnect-ASD (ours)** | **0.7298** | **Cross-site LOSO** |
+## Ethical considerations
 
-All prior baselines use same-site train/test splits — a fundamentally easier evaluation. Cross-site LOSO is the clinically relevant bar.
+Neurodevelopmental labels are sensitive. Use only data for which appropriate
+permissions and governance are in place. Avoid stigmatizing interpretations,
+claims of biological determinism, and attempts to infer traits outside the
+dataset's documented scope. Do not expose identifiable scans, metadata, model
+outputs, or generated reports.
 
----
+## Checkpoints and demo
 
-## Training Hardware
+- [Hugging Face model](https://huggingface.co/Yatsuiii/brain-connect-gcn)
+- [Hugging Face demo](https://huggingface.co/spaces/Yatsuiii/BrainConnect-ASD)
 
-Trained on **AMD MI300X** (192GB HBM3) via DigitalOcean, ROCm 7.0, PyTorch 2.5.1+rocm6.2.
-
-All 20 LOSO folds across 3 atlases (60 total training runs) were executed in parallel on the MI300X — a workload that would take days on CPU completed in hours.
-
-End-to-end inference (preprocessing + 20-model ensemble): **~20ms per subject** on MI300X.
-
----
-
-## Usage
-
-```python
-# Checkpoints are in the BrainConnect-ASD Space repo
-from huggingface_hub import hf_hub_download
-from brain_gcn.tasks import ClassificationTask
-
-ckpt = hf_hub_download(
-    repo_id="Yatsuiii/BrainConnect-ASD",
-    filename="checkpoints/cc200/adv_brain_mode_k32_site_cc200_loso_nyu/best.ckpt",
-    repo_type="space"
-)
-task = ClassificationTask.load_from_checkpoint(ckpt, map_location="cpu", strict=False)
-task.model.eval()
-
-# bw_t: (1, 30, 200) windowed BOLD · adj_t: (1, 200, 200) FC adjacency
-import torch
-with torch.no_grad():
-    out = task.model(bw_t, adj_t)
-    p_asd = torch.softmax(out, -1)[0, 1].item()
-```
-
----
+Checkpoint users should record the exact filename, revision, preprocessing
+configuration, and source commit.
 
 ## Citation
 
-```
-BrainConnect-ASD — AMD Developer Hackathon 2026
-Raghav Aryen · lablab.ai · AMD MI300X
-https://huggingface.co/spaces/Yatsuiii/BrainConnect-ASD
-```
+See [`CITATION.cff`](CITATION.cff). The repository currently represents software
+and preliminary experimental results, not a peer-reviewed clinical study.

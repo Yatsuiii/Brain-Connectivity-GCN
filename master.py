@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Master script to achieve 95% accuracy.
+Historical training-orchestration script.
 Automatically uses synthetic data if real data not ready,
 switches to real data when available.
 Runs full pipeline: train → HPO → final model → ensemble test
@@ -42,16 +42,14 @@ def print_banner(title):
     print("="*80 + "\n")
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Master accuracy optimization pipeline for Brain GCN"
-    )
+    parser = argparse.ArgumentParser(description="Brain GCN experiment pipeline")
     parser.add_argument("--skip_hpo", action="store_true", help="Skip HPO phase")
     parser.add_argument("--hpo_trials", type=int, default=50)
     parser.add_argument("--max_epochs", type=int, default=200)
     parser.add_argument("--accelerator", type=str, default="cpu")
     args = parser.parse_args()
     
-    print_banner("🧠 BRAIN GCN ACCURACY OPTIMIZATION")
+    print_banner("🧠 BRAIN GCN EXPERIMENT PIPELINE")
     
     # Check data
     print("📊 Checking data status...")
@@ -78,7 +76,7 @@ def main():
         print(f"  2. Run HPO for {args.hpo_trials} trials")
         print(f"  3. Train final model with best parameters")
     print(f"  4. Ensemble test with top-5 checkpoints")
-    print(f"  5. Report accuracy (target: 95%+)")
+    print(f"  5. Report held-out metrics")
     
     # Phase 1: Train optimized baseline
     print_banner("Phase 1: Train Optimized Baseline")
@@ -109,10 +107,6 @@ def main():
         initial_acc = initial_results["test_acc"]
         print(f"\n📈 Initial accuracy: {initial_acc*100:.2f}%")
         
-        if initial_acc >= 0.95:
-            print("🎉 ALREADY AT 95%! Optimization complete!")
-            return
-    
     # Phase 2: HPO (if not skipped and not synthetic)
     if not args.skip_hpo and not is_synthetic:
         print_banner(f"Phase 2: Hyperparameter Optimization ({args.hpo_trials} trials)")
@@ -136,7 +130,7 @@ def main():
     # Phase 3: Final model on real data (if applicable)
     if is_synthetic:
         print_banner("✅ SYNTHETIC DATA TESTING COMPLETE")
-        print("\nTo achieve 95% accuracy on REAL data:")
+        print("\nTo run the experiment on ABIDE data:")
         print("1. Ensure ABIDE dataset is downloaded (data/raw/)")
         print("2. Run: python train.py --prepare_data --n_subjects 200+")
         print("3. Then run: python master.py --accelerator gpu (if available)")
@@ -163,13 +157,8 @@ def main():
             print(f"Sensitivity: {final_results.get('test_sensitivity', 0)*100:.2f}%")
             print(f"Specificity: {final_results.get('test_specificity', 0)*100:.2f}%")
             
-            if final_acc >= 0.95:
-                print("\n🎉 SUCCESS! ACHIEVED 95% ACCURACY!")
-            else:
-                print(f"\n⚠️  Target not met. Try:")
-                print("  - Increase --max_epochs")
-                print("  - Use GPU: --accelerator gpu")
-                print("  - Run with more subjects (200+ recommended)")
+            print("\nReport this result with its split definition, seed, sample "
+                  "size, and uncertainty; do not tune against the test set.")
 
 if __name__ == "__main__":
     main()

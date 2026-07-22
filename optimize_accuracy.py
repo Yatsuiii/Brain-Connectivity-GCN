@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Comprehensive HPO + Training script to achieve 95% accuracy.
+Hyperparameter-search and training orchestration script.
 Runs hyperparameter optimization, then trains best model with ensembling.
 """
 
@@ -21,7 +21,7 @@ def main():
     args = parser.parse_args()
     
     print("\n" + "="*80)
-    print("BRAIN GCN ACCURACY OPTIMIZATION PIPELINE")
+    print("BRAIN GCN EXPERIMENT PIPELINE")
     print("="*80)
     
     # Step 1: HPO

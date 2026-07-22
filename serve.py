@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Full pipeline demo: .1D / .npz → GCN prediction → LLM clinical report → Gradio UI.
+Research demo: .1D / .npz → GCN output → synthetic LLM summary → Gradio UI.
 
 Usage:
     python serve.py                              # full pipeline UI
@@ -31,13 +31,10 @@ from predict import (
 )
 
 SYSTEM_PROMPT = (
-    "You are a clinical AI assistant specializing in functional MRI brain "
-    "connectivity analysis for autism spectrum disorder (ASD) diagnosis support. "
-    "You interpret outputs from a validated graph neural network (GCN) trained on "
-    "the ABIDE I dataset and provide structured clinical summaries for neurologists "
-    "and psychiatrists. Your reports are informative and evidence-based but always "
-    "clarify that findings are AI-assisted and should be integrated with full "
-    "clinical assessment. You do not make a diagnosis."
+    "You are a research assistant summarizing an experimental classifier output. "
+    "Do not diagnose, recommend care, assign clinical codes, or present generated "
+    "text as a measured subject-level brain finding. State that the summary is "
+    "synthetic, unvalidated, and for research demonstration only."
 )
 
 
@@ -63,9 +60,9 @@ def build_prompt(gcn_result: dict) -> str:
         f"Timepoints       : {n_tp} TRs\n"
         f"p(ASD)           : {p:.3f}\n"
         f"Confidence Level : {confidence_label(p)}\n"
-        f"Model Consensus  : {consensus}/4 site models predict ASD\n\n"
+        f"Model Consensus  : {consensus}/{len(pm)} site models predict ASD\n\n"
         f"Per-Model Breakdown (LOSO ensemble):\n{per_model_str}\n\n"
-        f"Please provide a structured clinical interpretation of these findings."
+        f"Please provide a cautious research-use summary of these model outputs."
     )
 
 
@@ -155,14 +152,16 @@ def launch_gradio(gcn_models, llm_model, tokenizer, device: str) -> None:
         ),
         outputs=[
             gr.Textbox(label="GCN Prediction", lines=10),
-            gr.Textbox(label="Clinical Report (LLM)", lines=20),
+            gr.Textbox(label="Synthetic Research Summary (LLM)", lines=20),
         ],
-        title="BrainConnect ASD — Clinical AI Pipeline",
+        title="BrainConnect-ASD — Research Demo",
         description=(
             "Upload a CC200 resting-state fMRI file (.1D or .npz).\n"
-            "Step 1: Scanner-site-invariant GCN predicts ASD vs Typical Control "
-            "(LOSO AUC = 0.7872 across 4 independent institutions).\n"
-            "Step 2: Fine-tuned LLM generates a structured clinical report.\n"
+            "Step 1: A LOSO GCN ensemble produces an experimental ASD/TC score. "
+            "Headline four-site evaluation: AUC 0.7872 (N=529); broader 20-site "
+            "experiment: AUC 0.7298 (N=1,102).\n"
+            "Step 2: A fine-tuned LLM generates an unvalidated synthetic summary.\n"
+            "Research use only; not a diagnostic or screening tool.\n"
             "Running on AMD Instinct MI300X."
         ),
     )

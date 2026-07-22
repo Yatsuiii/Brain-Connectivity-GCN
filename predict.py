@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 """
-Predict ASD vs Typical Control from a raw ABIDE CC200 .1D time-series file.
+Produce an experimental ASD vs Typical Control model score from an ABIDE CC200
+.1D time-series file. Research use only; not a diagnostic or screening tool.
 
-Ensemble of 4 adversarial brain-mode GCNs trained with leave-one-site-out
-cross-validation (LOSO). Each model held out a different scanner site —
-the ensemble is site-agnostic by design.
-
-LOSO evaluation across 529 unseen subjects (4 institution clusters):
-  NYU  (n=184)  AUC 0.7924
-  USM  (n=101)  AUC 0.7855
-  UCLA (n= 99)  AUC 0.8086
-  UM   (n=145)  AUC 0.7624
-  Mean          AUC 0.7872 ± 0.019
+The local inference path uses the checked-in 20-model CC200 ensemble. Each model
+was trained with one ABIDE I acquisition site held out. The broader 20-site LOSO
+experiment achieved AUC 0.7298 across 1,102 held-out subjects. The separate
+four-site evaluation reported in the README achieved AUC 0.7872 (N=529).
 
 Usage:
     python predict.py subject.1D                   # raw ABIDE .1D file
@@ -39,26 +34,8 @@ _FC_THRESHOLD = 0.2
 # ── LOSO ensemble checkpoints ──────────────────────────────────────────────
 _REPO = Path(__file__).resolve().parent
 _CHECKPOINTS = [
-    (
-        _REPO / "checkpoints/adv_brain_mode_k16_site_site_nyu"
-               / "brain-gcn-epoch=008-val_auc=0.776.ckpt",
-        "NYU",
-    ),
-    (
-        _REPO / "checkpoints/adv_brain_mode_k16_site_loso_usm"
-               / "brain-gcn-epoch=004-val_auc=0.780.ckpt",
-        "USM",
-    ),
-    (
-        _REPO / "checkpoints/adv_brain_mode_k16_site_loso_ucla_both"
-               / "brain-gcn-epoch=005-val_auc=0.738.ckpt",
-        "UCLA",
-    ),
-    (
-        _REPO / "checkpoints/adv_brain_mode_k16_site_loso_um_both"
-               / "brain-gcn-epoch=060-val_auc=0.851.ckpt",
-        "UM",
-    ),
+    (path, path.stem.removeprefix("cc200_").upper())
+    for path in sorted((_REPO / "hf_space" / "checkpoints").glob("cc200_*.ckpt"))
 ]
 
 
@@ -224,8 +201,10 @@ def _launch_gradio(models: list[tuple], device: str) -> None:
         title="Brain Connectivity ASD Predictor",
         description=(
             "Upload an ABIDE CC200 ROI time series (.1D format, 200 columns).\n"
-            "Ensemble of 4 adversarial GCNs trained with leave-one-site-out CV.\n"
-            "LOSO mean AUC = 0.7872 across 529 unseen subjects."
+            "20-model adversarial GCN ensemble trained with leave-one-site-out CV.\n"
+            "Headline four-site evaluation: AUC 0.7872 (N=529); broader 20-site "
+            "experiment: AUC 0.7298 (N=1,102).\n"
+            "Research use only; not a diagnostic or screening tool."
         ),
     )
     demo.launch(show_error=True)

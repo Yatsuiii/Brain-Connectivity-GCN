@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the repository and the exact version used."
+title: "BrainConnect-ASD: Cross-Site Adversarial GCN for Brain-Connectivity Research"
+type: software
+authors:
+  - family-names: Aryen
+    given-names: Raghav
+repository-code: "https://github.com/Yatsuiii/Brain-Connectivity-GCN"
+url: "https://huggingface.co/spaces/Yatsuiii/BrainConnect-ASD"
+license: Apache-2.0
+version: 0.1.0
+date-released: 2026-07-22
+keywords:
+  - autism spectrum disorder
+  - functional MRI
+  - graph neural network
+  - domain adaptation
+  - brain connectivity
