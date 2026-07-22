@@ -25,6 +25,69 @@ from .functional_connectivity import compute_fc, sliding_fc_windows
 log = logging.getLogger(__name__)
 
 
+def load_motion_params(subject: dict) -> np.ndarray | None:
+    """Return the first six rigid-body motion columns, when available.
+
+    The expected column order is three translations followed by three rotations
+    in radians. Subjects without a two-dimensional ``confounds`` array containing
+    at least six columns return ``None``.
+    """
+    confounds = subject.get("confounds")
+    if confounds is None:
+        return None
+
+    params = np.asarray(confounds)
+    if params.ndim != 2 or params.shape[1] < 6:
+        return None
+    return params[:, :6].astype(np.float32, copy=False)
+
+
+def compute_fd(motion_params: np.ndarray, head_radius_mm: float = 50.0) -> np.ndarray:
+    """Compute Power-style framewise displacement from rigid-body motion.
+
+    Translational differences are measured in millimetres. Rotational
+    differences, expected in radians, are converted to arc length using a
+    spherical head radius of 50 mm by default. The result has length ``T - 1``.
+    """
+    params = np.asarray(motion_params, dtype=np.float32)
+    if params.ndim != 2 or params.shape[1] < 6:
+        raise ValueError("motion_params must have shape (T, 6) or more columns")
+    if head_radius_mm <= 0:
+        raise ValueError("head_radius_mm must be positive")
+
+    delta = np.abs(np.diff(params[:, :6], axis=0))
+    delta[:, 3:6] *= head_radius_mm
+    return delta.sum(axis=1, dtype=np.float32)
+
+
+def scrub_bold(
+    bold: np.ndarray,
+    fd: np.ndarray,
+    fd_threshold: float = 0.5,
+    min_clean_trs: int = 50,
+) -> np.ndarray | None:
+    """Remove frames whose preceding motion transition exceeds ``fd_threshold``.
+
+    Frame zero is retained because it has no preceding transition. Returns
+    ``None`` when fewer than ``min_clean_trs`` frames remain.
+    """
+    bold_array = np.asarray(bold)
+    fd_array = np.asarray(fd).reshape(-1)
+    if bold_array.ndim != 2:
+        raise ValueError("bold must have shape (T, N)")
+    if fd_array.shape[0] != max(0, bold_array.shape[0] - 1):
+        raise ValueError("fd must have length T - 1")
+    if fd_threshold < 0:
+        raise ValueError("fd_threshold must be non-negative")
+    if min_clean_trs < 1:
+        raise ValueError("min_clean_trs must be at least 1")
+
+    keep = np.ones(bold_array.shape[0], dtype=bool)
+    keep[1:] = np.isfinite(fd_array) & (fd_array <= fd_threshold)
+    cleaned = bold_array[keep]
+    return cleaned if cleaned.shape[0] >= min_clean_trs else None
+
+
 def zscore(bold: np.ndarray) -> np.ndarray:
     """Z-score each ROI time series independently."""
     mean = bold.mean(axis=0, keepdims=True)
