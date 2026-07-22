@@ -9,6 +9,7 @@ Each sample returns:
                                use_dynamic_adj_sequence=True → per-window FCs
                                use_population_adj=True → shared population adj
     label       : ()         — int64 scalar  (0 = TC, 1 = ASD)
+    site_id     : ()         — int64 scalar used by site-adversarial training
 
 The adjacency is left as raw (thresholded) FC values so the model can apply
 its own Laplacian normalisation via utils.graph_conv.

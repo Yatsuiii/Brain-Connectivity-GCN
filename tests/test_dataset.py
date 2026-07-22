@@ -89,7 +89,7 @@ class TestABIDEDatasetAdjacencyModes:
         dataset = ABIDEDataset(npz_paths, use_dynamic_adj=False, use_dynamic_adj_sequence=False)
         assert len(dataset) == 3
         # Just verify we can access without error
-        bold, adj, label = dataset[0]
+        bold, adj, label, site_id = dataset[0]
         assert bold.shape[0] == 10  # max_windows implicit
         assert bold.ndim == 2  # (W, N) or (N,)
         assert label.ndim == 0  # Scalar
@@ -98,7 +98,7 @@ class TestABIDEDatasetAdjacencyModes:
         """dynamic_adj mode should return mean of per-window FCs: (N, N)."""
         npz_paths = sorted(temp_npz_dir.glob("*.npz"))
         dataset = ABIDEDataset(npz_paths, use_dynamic_adj=True, use_dynamic_adj_sequence=False)
-        bold, adj, label = dataset[0]
+        bold, adj, label, site_id = dataset[0]
         assert adj.ndim == 2
         assert adj.shape == (200, 200)
 
@@ -106,7 +106,7 @@ class TestABIDEDatasetAdjacencyModes:
         """dynamic_adj_sequence mode should return (W, N, N)."""
         npz_paths = sorted(temp_npz_dir.glob("*.npz"))
         dataset = ABIDEDataset(npz_paths, use_dynamic_adj_sequence=True)
-        bold, adj, label = dataset[0]
+        bold, adj, label, site_id = dataset[0]
         assert adj.ndim == 3
         assert adj.shape[0] == 10  # W windows
 
@@ -115,8 +115,8 @@ class TestABIDEDatasetAdjacencyModes:
         npz_paths = sorted(temp_npz_dir.glob("*.npz"))
         pop_adj = np.random.randn(200, 200).astype(np.float32)
         dataset = ABIDEDataset(npz_paths, population_adj=pop_adj)
-        bold1, adj1, label1 = dataset[0]
-        bold2, adj2, label2 = dataset[1]
+        bold1, adj1, label1, site_id1 = dataset[0]
+        bold2, adj2, label2, site_id2 = dataset[1]
         # Both should have the same adjacency matrix
         assert np.allclose(adj1.numpy(), adj2.numpy())
 
@@ -128,7 +128,7 @@ class TestABIDEDatasetThresholding:
         """Adjacency values below threshold should be zeroed."""
         npz_paths = sorted(temp_npz_dir.glob("*.npz"))
         dataset = ABIDEDataset(npz_paths, fc_threshold=0.5)
-        bold, adj, label = dataset[0]
+        bold, adj, label, site_id = dataset[0]
         # At fc_threshold=0.5, small absolute values should be zero
         # (Assuming randomly generated data has mixed magnitudes)
         assert (adj.numpy() >= 0.5).any() or (adj.numpy() == 0).all()

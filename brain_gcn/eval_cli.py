@@ -92,7 +92,7 @@ def get_predictions(
     all_labels = []
 
     with torch.no_grad():
-        for bold_windows, adj, labels in dm.test_dataloader():
+        for bold_windows, adj, labels, _site_ids in dm.test_dataloader():
             logits = model(bold_windows.to(device), adj.to(device))
             probs = torch.softmax(logits, dim=-1)[:, 1]
             all_probs.append(probs.cpu().numpy())
