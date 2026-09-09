@@ -20,7 +20,7 @@ tags:
 
 # BrainConnect-ASD
 
-Cross-site Autism Spectrum Disorder classification research from resting-state fMRI, built for the AMD Developer Hackathon 2026. Headline four-site LOSO AUC: **0.7872** across 529 held-out subjects. Broader 20-site LOSO AUC: **0.7298** across 1,102 subjects. Research use only; not a diagnostic or screening tool.
+Cross-site Autism Spectrum Disorder classification research from resting-state fMRI, built for the 2026 AMD Developer Hackathon and winner of its Fine-Tuning Track. The event was run through [lablab.ai](https://lablab.ai/ai-hackathons/amd-developer/). Headline four-site LOSO AUC: **0.7872** across 529 held-out subjects. Broader 20-site LOSO AUC: **0.7298** across 1,102 subjects. Research use only; not a diagnostic or screening tool.
 
 ## Models
 

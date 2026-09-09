@@ -9,9 +9,12 @@ neural networks can reduce acquisition-site confounding in autism spectrum
 disorder (ASD) classification from resting-state fMRI. Its headline four-site
 LOSO evaluation achieves **0.7872 ROC AUC across 529 held-out subjects**.
 
-The project was developed for the AMD Developer Hackathon 2026 and trained on
-ABIDE I. It is intended for reproducible machine-learning research, **not for
-clinical diagnosis, screening, or treatment decisions**.
+The project was developed for the 2026 AMD Developer Hackathon, run through
+[lablab.ai](https://lablab.ai/ai-hackathons/amd-developer/), and won the
+Fine-Tuning Track. The result is recorded in [lablab.ai's winner
+announcement](https://www.linkedin.com/posts/lablab-ai_10770-builders-walked-in-these-teams-activity-7472361155663978496-knnz).
+It was trained on ABIDE I and is intended for reproducible machine-learning
+research, **not for clinical diagnosis, screening, or treatment decisions**.
 
 ## Research question
 
